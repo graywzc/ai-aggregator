@@ -1,26 +1,26 @@
 APP_NAME = AIAggregator
 APP_EXE = AIAggregatorApp
 BUILD_DIR = build
-APP_BUNDLE = \$(BUILD_DIR)/\$(APP_NAME).app
-APP_CONTENTS = \$(APP_BUNDLE)/Contents
-APP_MACOS = \$(APP_CONTENTS)/MacOS
-APP_RESOURCES = \$(APP_CONTENTS)/Resources
+APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
+APP_CONTENTS = $(APP_BUNDLE)/Contents
+APP_MACOS = $(APP_CONTENTS)/MacOS
+APP_RESOURCES = $(APP_CONTENTS)/Resources
 
-all: \$(APP_BUNDLE)
+all: $(APP_BUNDLE)
 
-\$(APP_BUNDLE): Info.plist
-	@mkdir -p \$(APP_MACOS)
-	@mkdir -p \$(APP_RESOURCES)
+$(APP_BUNDLE): Info.plist
+	@mkdir -p $(APP_MACOS)
+	@mkdir -p $(APP_RESOURCES)
 	swift build -c release
-	@cp .build/release/\$(APP_EXE) \$(APP_MACOS)/\$(APP_NAME)
-	@cp Info.plist \$(APP_CONTENTS)/
-	@echo "Built \$(APP_BUNDLE)"
+	@cp .build/release/$(APP_EXE) $(APP_MACOS)/$(APP_NAME)
+	@cp Info.plist $(APP_CONTENTS)/
+	@echo "Built $(APP_BUNDLE)"
 
 test:
 	swift test
 
 clean:
-	@rm -rf \$(BUILD_DIR)
+	@rm -rf $(BUILD_DIR)
 	@rm -rf .build
 
 .PHONY: all clean test
