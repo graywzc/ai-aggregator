@@ -18,6 +18,9 @@ $(APP_BUNDLE): Info.plist
 	@echo "APPL????" > $(APP_CONTENTS)/PkgInfo
 	@echo "Built $(APP_BUNDLE)"
 
+run: all
+	@open $(APP_BUNDLE)
+
 test:
 	swift test
 
@@ -29,4 +32,4 @@ release: all
 	@cd $(BUILD_DIR) && zip -ry $(APP_NAME).zip $(APP_NAME).app
 	@echo "Created $(BUILD_DIR)/$(APP_NAME).zip"
 
-.PHONY: all clean test release
+.PHONY: all clean test release run
