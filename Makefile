@@ -13,7 +13,9 @@ $(APP_BUNDLE): Info.plist
 	@mkdir -p $(APP_RESOURCES)
 	swift build -c release
 	@cp .build/release/$(APP_EXE) $(APP_MACOS)/$(APP_NAME)
+	@chmod +x $(APP_MACOS)/$(APP_NAME)
 	@cp Info.plist $(APP_CONTENTS)/
+	@echo "APPL????" > $(APP_CONTENTS)/PkgInfo
 	@echo "Built $(APP_BUNDLE)"
 
 test:
@@ -24,7 +26,7 @@ clean:
 	@rm -rf .build
 
 release: all
-	@cd $(BUILD_DIR) && zip -r $(APP_NAME).zip $(APP_NAME).app
+	@cd $(BUILD_DIR) && zip -ry $(APP_NAME).zip $(APP_NAME).app
 	@echo "Created $(BUILD_DIR)/$(APP_NAME).zip"
 
 .PHONY: all clean test release
