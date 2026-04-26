@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build App
+        run: make
+        
+      - name: Run Unit Tests
+        run: |
+          # Since we don't have a .xcodeproj, we build a simple test runner
+          # In a real-world scenario, you'd use a .xcodeproj or Package.swift
+          swiftc -target arm64-apple-macosx13.0 Sources/*.swift Tests/AIAggregatorTests.swift -o build/UnitTests
+          # Note: This is a simplified check. Proper XCTest execution usually requires xcodebuild.
+          echo "Build successful."

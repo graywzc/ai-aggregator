@@ -71,7 +71,7 @@ class UsageService: ObservableObject {
     }()
     private static let isoFormatter = ISO8601DateFormatter()
 
-    private func parseDate(_ value: Any?) -> Date? {
+    internal func parseDate(_ value: Any?) -> Date? {
         if let s = value as? String {
             if let d = Self.isoFormatterFractional.date(from: s) { return d }
             if let d = Self.isoFormatter.date(from: s) { return d }
@@ -86,7 +86,7 @@ class UsageService: ObservableObject {
         return nil
     }
 
-    private func extractReset(from dict: [String: Any]) -> Date? {
+    internal func extractReset(from dict: [String: Any]) -> Date? {
         // Try common ISO timestamp fields
         for key in ["resets_at", "reset_at", "next_reset_at", "window_resets_at"] {
             if let d = parseDate(dict[key]) { return d }
@@ -205,7 +205,7 @@ class UsageService: ObservableObject {
         }.resume()
     }
 
-    private func windowLabel(seconds: Int) -> String {
+    internal func windowLabel(seconds: Int) -> String {
         if seconds >= 86400 { return "\(seconds / 86400)d" }
         if seconds >= 3600  { return "\(seconds / 3600)h" }
         if seconds >= 60    { return "\(seconds / 60)m" }
