@@ -16,6 +16,8 @@ $(APP_BUNDLE): Info.plist
 	@chmod +x $(APP_MACOS)/$(APP_NAME)
 	@cp Info.plist $(APP_CONTENTS)/
 	@echo "APPL????" > $(APP_CONTENTS)/PkgInfo
+	@echo "Signing app..."
+	@codesign --force --deep --sign - $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE)"
 
 run: all
