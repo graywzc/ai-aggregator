@@ -23,4 +23,8 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -rf .build
 
-.PHONY: all clean test
+release: all
+	@cd $(BUILD_DIR) && zip -r $(APP_NAME).zip $(APP_NAME).app
+	@echo "Created $(BUILD_DIR)/$(APP_NAME).zip"
+
+.PHONY: all clean test release

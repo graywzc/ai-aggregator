@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build App
+        run: make
+        
+      - name: Package App
+        run: |
+          cd build
+          zip -r AIAggregator.zip AIAggregator.app
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/AIAggregator.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
