@@ -1,0 +1,168 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "AIAggregator-arm64-apple-macosx-debug.module": ["<AIAggregator-arm64-apple-macosx-debug.module>"]
+  "AIAggregatorApp-arm64-apple-macosx-debug.exe": ["<AIAggregatorApp-arm64-apple-macosx-debug.exe>"]
+  "AIAggregatorApp-arm64-apple-macosx-debug.module": ["<AIAggregatorApp-arm64-apple-macosx-debug.module>"]
+  "AIAggregatorPackageTests-arm64-apple-macosx-debug.module": ["<AIAggregatorPackageTests-arm64-apple-macosx-debug.module>"]
+  "AIAggregatorPackageTests-arm64-apple-macosx-debug.test": ["<AIAggregatorPackageTests-arm64-apple-macosx-debug.test>"]
+  "AIAggregatorTests-arm64-apple-macosx-debug.module": ["<AIAggregatorTests-arm64-apple-macosx-debug.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<AIAggregator-arm64-apple-macosx-debug.module>","<AIAggregatorApp-arm64-apple-macosx-debug.exe>","<AIAggregatorApp-arm64-apple-macosx-debug.module>"]
+  "test": ["<AIAggregator-arm64-apple-macosx-debug.module>","<AIAggregatorApp-arm64-apple-macosx-debug.exe>","<AIAggregatorApp-arm64-apple-macosx-debug.module>","<AIAggregatorPackageTests-arm64-apple-macosx-debug.test>","<AIAggregatorTests-arm64-apple-macosx-debug.module>"]
+default: "main"
+nodes:
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregatorApp/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/graywzc/projects/ai-aggregator/Tests/AIAggregatorTests/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp":
+    is-mutated: true
+commands:
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/AIAggregatorApp.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/ProviderWebAuthView.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/Providers.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/UsagePopoverView.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/UsageService.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/WindowManager.swift"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/sources"]
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/sources"
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp-entitlement.plist"]
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp-entitlement.plist"
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregatorApp/main.swift"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/sources"]
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/sources"
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/main.swift.o"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.product/Objects.LinkFileList"
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.derived/runner.swift"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/sources"]
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/sources"
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.derived/runner.swift":
+    tool: test-entry-point-tool
+    inputs: []
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.derived/runner.swift"]
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorTests.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorUITests.swift.o"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.product/Objects.LinkFileList"
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/graywzc/projects/ai-aggregator/Tests/AIAggregatorTests/AIAggregatorTests.swift","/Users/graywzc/projects/ai-aggregator/Tests/AIAggregatorTests/AIAggregatorUITests.swift"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/sources"]
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/sources"
+
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Library/Developer/CommandLineTools/usr/bin/swiftc"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+
+  "<AIAggregator-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregator.swiftmodule"]
+    outputs: ["<AIAggregator-arm64-apple-macosx-debug.module>"]
+
+  "<AIAggregatorApp-arm64-apple-macosx-debug.exe>":
+    tool: phony
+    inputs: ["<AIAggregatorApp-arm64-apple-macosx-debug.exe-CodeSigning>"]
+    outputs: ["<AIAggregatorApp-arm64-apple-macosx-debug.exe>"]
+
+  "<AIAggregatorApp-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/main.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorApp.swiftmodule"]
+    outputs: ["<AIAggregatorApp-arm64-apple-macosx-debug.module>"]
+
+  "<AIAggregatorPackageTests-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorPackageTests.swiftmodule"]
+    outputs: ["<AIAggregatorPackageTests-arm64-apple-macosx-debug.module>"]
+
+  "<AIAggregatorPackageTests-arm64-apple-macosx-debug.test>":
+    tool: phony
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.xctest/Contents/MacOS/AIAggregatorPackageTests"]
+    outputs: ["<AIAggregatorPackageTests-arm64-apple-macosx-debug.test>"]
+
+  "<AIAggregatorTests-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorTests.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorUITests.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorTests.swiftmodule"]
+    outputs: ["<AIAggregatorTests-arm64-apple-macosx-debug.module>"]
+
+  "C.AIAggregator-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/AIAggregatorApp.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/ProviderWebAuthView.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/Providers.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/UsagePopoverView.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/UsageService.swift","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/WindowManager.swift","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/sources"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregator.swiftmodule"]
+    description: "Compiling Swift Module 'AIAggregator' (6 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","AIAggregator","-emit-dependencies","-emit-module","-emit-module-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregator.swiftmodule","-output-file-map","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/sources","-I","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/include/AIAggregator-Swift.h","-color-diagnostics","-swift-version","5","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","ai_aggregator"]
+
+  "C.AIAggregatorApp-arm64-apple-macosx-debug.exe":
+    tool: shell
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/main.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.product/Objects.LinkFileList"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/AIAggregatorApp"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-L","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug","-o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp","-module-name","AIAggregatorApp","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_AIAggregatorApp_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Library/Developer/CommandLineTools/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx13.0","-Xlinker","-add_ast_path","-Xlinker","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregator.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorApp.swiftmodule","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g"]
+
+  "C.AIAggregatorApp-arm64-apple-macosx-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp-entitlement.plist"]
+    outputs: ["<AIAggregatorApp-arm64-apple-macosx-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/AIAggregatorApp"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp-entitlement.plist","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp"]
+
+  "C.AIAggregatorApp-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/graywzc/projects/ai-aggregator/Sources/AIAggregatorApp/main.swift","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregator.swiftmodule","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/sources"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/main.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorApp.swiftmodule"]
+    description: "Compiling Swift Module 'AIAggregatorApp' (1 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","AIAggregatorApp","-emit-dependencies","-emit-module","-emit-module-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorApp.swiftmodule","-output-file-map","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/output-file-map.json","-incremental","-c","@/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorApp.build/sources","-I","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","AIAggregatorApp_main","-color-diagnostics","-swift-version","5","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","ai_aggregator"]
+
+  "C.AIAggregatorPackageTests-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.derived/runner.swift","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorTests.swiftmodule","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/sources"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorPackageTests.swiftmodule"]
+    description: "Compiling Swift Module 'AIAggregatorPackageTests' (1 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","AIAggregatorPackageTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorPackageTests.swiftmodule","-output-file-map","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/sources","-I","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/include/AIAggregatorPackageTests-Swift.h","-color-diagnostics","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","ai_aggregator"]
+
+  "C.AIAggregatorPackageTests-arm64-apple-macosx-debug.test":
+    tool: shell
+    inputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorTests.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorUITests.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.product/Objects.LinkFileList"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.xctest/Contents/MacOS/AIAggregatorPackageTests"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.xctest/Contents/MacOS/AIAggregatorPackageTests"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-L","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug","-o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.xctest/Contents/MacOS/AIAggregatorPackageTests","-module-name","AIAggregatorPackageTests","-Xlinker","-no_warn_duplicate_libraries","-Xlinker","-bundle","-Xlinker","-rpath","-Xlinker","@loader_path/../../../","@/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Library/Developer/CommandLineTools/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx13.0","-Xlinker","-add_ast_path","-Xlinker","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregator.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorPackageTests.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorTests.swiftmodule","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g"]
+
+  "C.AIAggregatorTests-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/graywzc/projects/ai-aggregator/Tests/AIAggregatorTests/AIAggregatorTests.swift","/Users/graywzc/projects/ai-aggregator/Tests/AIAggregatorTests/AIAggregatorUITests.swift","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregator.swiftmodule","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/sources"]
+    outputs: ["/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorTests.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/AIAggregatorUITests.swift.o","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorTests.swiftmodule"]
+    description: "Compiling Swift Module 'AIAggregatorTests' (2 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","AIAggregatorTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules/AIAggregatorTests.swiftmodule","-output-file-map","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorTests.build/sources","-I","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-color-diagnostics","-swift-version","5","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","ai_aggregator"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/","/Users/graywzc/projects/ai-aggregator/Sources/AIAggregatorApp/","/Users/graywzc/projects/ai-aggregator/Tests/AIAggregatorTests/","/Users/graywzc/projects/ai-aggregator/Package.swift","/Users/graywzc/projects/ai-aggregator/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

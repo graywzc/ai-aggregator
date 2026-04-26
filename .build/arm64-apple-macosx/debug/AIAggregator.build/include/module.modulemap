@@ -1,0 +1,3 @@
+module AIAggregator {
+    header "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/include/AIAggregator-Swift.h"
+}

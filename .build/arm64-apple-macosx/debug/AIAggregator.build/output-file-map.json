@@ -1,0 +1,47 @@
+{
+  "": {
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/primary.swiftdeps"
+  },
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/AIAggregatorApp.swift": {
+    "dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.d",
+    "object": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swift.o",
+    "swiftmodule": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.swiftdeps",
+    "diagnostics": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/AIAggregatorApp.dia"
+  },
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/ProviderWebAuthView.swift": {
+    "dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.d",
+    "object": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swift.o",
+    "swiftmodule": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView~partial.swiftmodule",
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.swiftdeps",
+    "diagnostics": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/ProviderWebAuthView.dia"
+  },
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/Providers.swift": {
+    "dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.d",
+    "object": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swift.o",
+    "swiftmodule": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers~partial.swiftmodule",
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.swiftdeps",
+    "diagnostics": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/Providers.dia"
+  },
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/UsagePopoverView.swift": {
+    "dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.d",
+    "object": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swift.o",
+    "swiftmodule": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView~partial.swiftmodule",
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.swiftdeps",
+    "diagnostics": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsagePopoverView.dia"
+  },
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/UsageService.swift": {
+    "dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.d",
+    "object": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swift.o",
+    "swiftmodule": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService~partial.swiftmodule",
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.swiftdeps",
+    "diagnostics": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/UsageService.dia"
+  },
+  "/Users/graywzc/projects/ai-aggregator/Sources/AIAggregator/WindowManager.swift": {
+    "dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.d",
+    "object": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swift.o",
+    "swiftmodule": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.swiftdeps",
+    "diagnostics": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregator.build/WindowManager.dia"
+  }
+}

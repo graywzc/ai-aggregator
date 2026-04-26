@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.d",
+    "object": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/graywzc/projects/ai-aggregator/.build/arm64-apple-macosx/debug/AIAggregatorPackageTests.build/runner.dia"
+  }
+}
