@@ -125,7 +125,7 @@ class UsageService: ObservableObject {
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/userinfo.profile"
         ].joined(separator: " ")
-        
+
         var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         components.queryItems = [
             URLQueryItem(name: "client_id", value: googleClientId),
@@ -147,6 +147,9 @@ class UsageService: ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         URLSession.shared.dataTask(with: request) { data, response, error in
+            if let data = data, let raw = String(data: data, encoding: .utf8) {
+                print("[Gemini] token exchange: \(raw.prefix(300))")
+            }
             guard let data = data,
                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let refreshToken = dict["refresh_token"] as? String else {
@@ -231,10 +234,24 @@ class UsageService: ObservableObject {
         guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.httpBody = "{}".data(using: .utf8)
+        let loadBody: [String: Any] = [
+            "metadata": [
+                "ideType": "IDE_UNSPECIFIED",
+                "platform": "PLATFORM_UNSPECIFIED",
+                "pluginType": "GEMINI"
+            ]
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: loadBody)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         session.dataTask(with: request) { data, response, error in
+            if let httpResp = response as? HTTPURLResponse {
+                print("[Gemini] loadCodeAssist HTTP \(httpResp.statusCode)")
+            }
+            if let data = data, let raw = String(data: data, encoding: .utf8) {
+                print("[Gemini] loadCodeAssist body: \(raw.prefix(500))")
+            }
             guard let data = data,
                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let project = dict["cloudaicompanionProject"] as? String else {
@@ -244,6 +261,7 @@ class UsageService: ObservableObject {
                 }
                 return
             }
+            print("[Gemini] project: \(project)")
             self.fetchGeminiUsage(session: session, token: token, projectId: project)
         }.resume()
     }
@@ -255,8 +273,15 @@ class UsageService: ObservableObject {
         let body: [String: Any] = ["project": projectId]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         session.dataTask(with: request) { data, response, error in
+            if let httpResp = response as? HTTPURLResponse {
+                print("[Gemini] retrieveUserQuota HTTP \(httpResp.statusCode)")
+            }
+            if let data = data, let raw = String(data: data, encoding: .utf8) {
+                print("[Gemini] retrieveUserQuota body: \(raw.prefix(1000))")
+            }
             DispatchQueue.main.async {
                 guard let data = data,
                       let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
