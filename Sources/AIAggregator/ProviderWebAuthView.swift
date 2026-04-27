@@ -2,6 +2,13 @@ import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
 import AppKit
+import CommonCrypto
+
+extension Notification.Name {
+    static let reloadChatGPT = Notification.Name("reloadChatGPT")
+    static let reloadClaude  = Notification.Name("reloadClaude")
+    static let reloadGemini  = Notification.Name("reloadGemini")
+}
 
 // MARK: - Attachment model
 
@@ -35,9 +42,26 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         claudeView  = Self.makeWebView()
         geminiView  = Self.makeWebView()
         super.init()
-        
+
         chatGPTView.load(URLRequest(url: URL(string: "https://chatgpt.com/")!))
         claudeView.load(URLRequest(url: URL(string: "https://claude.ai/new")!))
+        geminiView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
+
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(reloadChatGPT), name: .reloadChatGPT, object: nil)
+        nc.addObserver(self, selector: #selector(reloadClaude),  name: .reloadClaude,  object: nil)
+        nc.addObserver(self, selector: #selector(reloadGemini),  name: .reloadGemini,  object: nil)
+    }
+
+    @objc private func reloadChatGPT() {
+        chatGPTView.load(URLRequest(url: URL(string: "https://chatgpt.com/")!))
+    }
+
+    @objc private func reloadClaude() {
+        claudeView.load(URLRequest(url: URL(string: "https://claude.ai/new")!))
+    }
+
+    @objc private func reloadGemini() {
         geminiView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
     }
 
@@ -419,56 +443,24 @@ struct ProviderWebAuthView: View {
     @State private var attachments: [ChatAttachment] = []
     @State private var isDropTargeted: Bool = false
     
-    // OAuth states
-    @State private var authCode: String = ""
-    @State private var showOAuthInput: Bool = false
-
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
                 if visibility.showChatGPT {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "ChatGPT", showUsageLogin: false)
+                        HeaderBar(title: "ChatGPT")
                         WebViewHost(webView: controller.chatGPTView)
                     }
                 }
                 if visibility.showClaude {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "Claude", showUsageLogin: false)
+                        HeaderBar(title: "Claude")
                         WebViewHost(webView: controller.claudeView)
                     }
                 }
                 if visibility.showGemini {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "Gemini", showUsageLogin: true) {
-                            NSWorkspace.shared.open(UsageService.shared.googleAuthURL)
-                            showOAuthInput = true
-                        }
-                        
-                        if showOAuthInput {
-                            VStack(spacing: 8) {
-                                Text("Google login opened in your browser. After signing in, you will reach a page. Copy the code displayed and paste it here:")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                HStack {
-                                    TextField("Enter code here...", text: $authCode)
-                                        .textFieldStyle(.roundedBorder)
-                                    Button("Done") {
-                                        let code = authCode.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        if !code.isEmpty {
-                                            UsageService.shared.handleOAuthCode(code)
-                                            showOAuthInput = false
-                                            authCode = ""
-                                        }
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                }
-                            }
-                            .padding()
-                            .background(Color.accentColor.opacity(0.05))
-                        }
-                        
+                        HeaderBar(title: "Gemini")
                         WebViewHost(webView: controller.geminiView)
                     }
                 }
@@ -555,23 +547,11 @@ struct ProviderWebAuthView: View {
 
 private struct HeaderBar: View {
     let title: String
-    let showUsageLogin: Bool
-    var onUsageLogin: (() -> Void)? = nil
-    
+
     var body: some View {
         HStack {
             Text(title).font(.headline)
             Spacer()
-            if showUsageLogin {
-                Button(action: { onUsageLogin?() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "key.fill")
-                        Text("Sign in for Usage Stats")
-                    }
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -579,10 +559,245 @@ private struct HeaderBar: View {
     }
 }
 
-private struct WebViewHost: NSViewRepresentable {
+struct WebViewHost: NSViewRepresentable {
     let webView: WKWebView
     func makeNSView(context: Context) -> WKWebView { webView }
     func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+
+// MARK: - Single-provider auth view
+
+final class AuthWebController: NSObject, ObservableObject, WKUIDelegate {
+    let webView: WKWebView
+    private var popupWebView: WKWebView?
+    private var popupWindow: NSWindow?
+
+    init(url: URL) {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = WKWebsiteDataStore.default()
+        let prefs = WKWebpagePreferences()
+        prefs.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = prefs
+
+        // Suppress Google One Tap auto-prompt but allow the full Google library to load
+        let suppressOneTap = WKUserScript(
+            source: """
+            (function() {
+                var _google;
+                Object.defineProperty(window, 'google', {
+                    configurable: true,
+                    get: function() { return _google; },
+                    set: function(v) {
+                        _google = v;
+                        if (_google && _google.accounts && _google.accounts.id) {
+                            _google.accounts.id.prompt = function() {};
+                        }
+                    }
+                });
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        config.userContentController.addUserScript(suppressOneTap)
+
+        webView = WKWebView(frame: .zero, configuration: config)
+        webView.customUserAgent =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        super.init()
+        webView.uiDelegate = self
+        webView.load(URLRequest(url: url))
+    }
+
+    // Open OAuth popups (e.g. Google Sign-In) in a real window so they're visible and functional
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let popup = WKWebView(frame: NSRect(x: 0, y: 0, width: 500, height: 640), configuration: configuration)
+        popup.uiDelegate = self
+        popupWebView = popup
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 640),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Sign in with Google"
+        window.contentView = popup
+        window.center()
+        window.isReleasedWhenClosed = false
+        popupWindow = window
+
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        return popup
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        if webView === popupWebView {
+            popupWindow?.close()
+            popupWindow = nil
+            popupWebView = nil
+        }
+    }
+}
+
+struct ProviderAuthView: View {
+    let provider: AuthProvider
+    let onComplete: () -> Void
+
+    @StateObject private var webController: AuthWebController
+    @StateObject private var usageService = UsageService.shared
+    @State private var pollTimer: Timer?
+
+    init(provider: AuthProvider, onComplete: @escaping () -> Void) {
+        self.provider = provider
+        self.onComplete = onComplete
+        _webController = StateObject(wrappedValue: AuthWebController(url: provider.url))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sign in to \(provider.name)").font(.headline)
+                Spacer()
+                Button("Cancel") { finish() }
+                    .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(NSColor.windowBackgroundColor))
+
+            WebViewHost(webView: webController.webView)
+        }
+        .frame(minWidth: 480, minHeight: 640)
+        .onAppear {
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+                UsageService.shared.fetchAllUsages()
+            }
+        }
+        .onDisappear { pollTimer?.invalidate(); pollTimer = nil }
+        .onReceive(usageService.objectWillChange) { _ in
+            DispatchQueue.main.async { if isLoggedIn { finish() } }
+        }
+    }
+
+    private var isLoggedIn: Bool {
+        switch provider {
+        case .chatGPT: return usageService.chatGptError == nil && !usageService.chatGptWindows.isEmpty
+        case .claude:  return usageService.claudeError  == nil && !usageService.claudeWindows.isEmpty
+        }
+    }
+
+    private func finish() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        onComplete()
+    }
+}
+
+// MARK: - Gemini OAuth webview (intercepts redirect to extract code)
+
+final class GeminiAuthWebController: NSObject, ObservableObject, WKNavigationDelegate {
+    let webView: WKWebView
+    private let verifier: String
+    var onComplete: (() -> Void)?
+
+    override init() {
+        verifier = Self.generateVerifier()
+        let challenge = Self.codeChallenge(for: verifier)
+
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = WKWebsiteDataStore.default()
+        let prefs = WKWebpagePreferences()
+        prefs.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = prefs
+        let wv = WKWebView(frame: .zero, configuration: config)
+        wv.customUserAgent =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        webView = wv
+        super.init()
+        webView.navigationDelegate = self
+
+        let scopes = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+        var comps = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
+        comps.queryItems = [
+            URLQueryItem(name: "client_id",             value: "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"),
+            URLQueryItem(name: "redirect_uri",           value: "https://codeassist.google.com/authcode"),
+            URLQueryItem(name: "response_type",          value: "code"),
+            URLQueryItem(name: "scope",                  value: scopes),
+            URLQueryItem(name: "access_type",            value: "offline"),
+            URLQueryItem(name: "prompt",                 value: "consent"),
+            URLQueryItem(name: "code_challenge",         value: challenge),
+            URLQueryItem(name: "code_challenge_method",  value: "S256"),
+        ]
+        webView.load(URLRequest(url: comps.url!))
+    }
+
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = action.request.url,
+              url.host == "codeassist.google.com",
+              url.path == "/authcode",
+              let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                  .queryItems?.first(where: { $0.name == "code" })?.value
+        else { decisionHandler(.allow); return }
+
+        decisionHandler(.cancel)
+        UsageService.shared.handleOAuthCode(code, verifier: verifier)
+        onComplete?()
+    }
+
+    private static func generateVerifier() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func codeChallenge(for verifier: String) -> String {
+        guard let data = verifier.data(using: .utf8) else { return verifier }
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes { _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest) }
+        return Data(digest).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+struct GeminiAuthView: View {
+    let onComplete: () -> Void
+    @StateObject private var controller = GeminiAuthWebController()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sign in to Gemini").font(.headline)
+                Spacer()
+                Button("Cancel") { onComplete() }.buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(NSColor.windowBackgroundColor))
+
+            WebViewHost(webView: controller.webView)
+        }
+        .frame(minWidth: 480, minHeight: 640)
+        .onAppear {
+            controller.onComplete = {
+                DispatchQueue.main.async {
+                    UsageService.shared.fetchAllUsages()
+                    onComplete()
+                }
+            }
+        }
+    }
 }
 
 private struct AttachmentChipBar: View {

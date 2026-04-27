@@ -46,7 +46,11 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.fetchAllUsages()
+            guard let self = self else { return }
+            let allLoggedOut = self.chatGptError == "Logged Out"
+                && self.claudeError == "Logged Out"
+                && self.geminiError == "Logged Out"
+            if !allLoggedOut { self.fetchAllUsages() }
         }
         fetchAllUsages()
     }
@@ -76,32 +80,30 @@ class UsageService: ObservableObject {
     // MARK: - Logout Logic
 
     func logoutChatGPT() {
+        chatGptWindows = []
+        chatGptError = "Logged Out"
+        ProvidersVisibility.shared.showChatGPT = false
         clearCookies(for: "chatgpt.com") {
-            DispatchQueue.main.async {
-                self.chatGptWindows = []
-                self.chatGptError = "Logged Out"
-            }
+            NotificationCenter.default.post(name: .reloadChatGPT, object: nil)
         }
     }
 
     func logoutClaude() {
+        claudeWindows = []
+        claudeError = "Logged Out"
+        ProvidersVisibility.shared.showClaude = false
         clearCookies(for: "claude.ai") {
-            DispatchQueue.main.async {
-                self.claudeWindows = []
-                self.claudeError = "Logged Out"
-            }
+            NotificationCenter.default.post(name: .reloadClaude, object: nil)
         }
     }
 
     func logoutGemini() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: "gemini_refresh_token"
-        ]
-        SecItemDelete(query as CFDictionary)
+        UserDefaults.standard.removeObject(forKey: "gemini_refresh_token")
+        ProvidersVisibility.shared.showGemini = false
         DispatchQueue.main.async {
             self.geminiWindows = []
             self.geminiError = "Logged Out"
+            NotificationCenter.default.post(name: .reloadGemini, object: nil)
         }
     }
 
@@ -116,6 +118,7 @@ class UsageService: ObservableObject {
             group.notify(queue: .main) { completion() }
         }
     }
+
 
     // MARK: - Gemini OAuth Flow
 
@@ -138,11 +141,12 @@ class UsageService: ObservableObject {
         return components.url!
     }
 
-    func handleOAuthCode(_ code: String) {
+    func handleOAuthCode(_ code: String, verifier: String = "") {
         guard let url = URL(string: "https://oauth2.googleapis.com/token") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        let body = "client_id=\(googleClientId)&client_secret=\(googleClientSecret)&code=\(code)&redirect_uri=\(redirectUri)&grant_type=authorization_code"
+        var body = "client_id=\(googleClientId)&client_secret=\(googleClientSecret)&code=\(code)&redirect_uri=\(redirectUri)&grant_type=authorization_code"
+        if !verifier.isEmpty { body += "&code_verifier=\(verifier)" }
         request.httpBody = body.data(using: .utf8)
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
@@ -161,29 +165,11 @@ class UsageService: ObservableObject {
     }
 
     private func saveRefreshToken(_ token: String) {
-        let data = token.data(using: .utf8)!
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: "gemini_refresh_token",
-            kSecValueData as String: data
-        ]
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
+        UserDefaults.standard.set(token, forKey: "gemini_refresh_token")
     }
 
     private func getRefreshToken() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: "gemini_refresh_token",
-            kSecReturnData as String: kCFBooleanTrue!,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecSuccess, let data = result as? Data {
-            return String(data: data, encoding: .utf8)
-        }
-        return nil
+        UserDefaults.standard.string(forKey: "gemini_refresh_token")
     }
 
     // MARK: - Fetchers
@@ -297,17 +283,24 @@ class UsageService: ObservableObject {
                         return
                     }
 
-                    var windows: [UsageWindow] = []
+                    // Collect all buckets then keep the lowest (most restrictive) per label
+                    var best: [String: UsageWindow] = [:]
                     for bucket in buckets {
                         if let frac = bucket["remainingFraction"] as? Double {
                             let modelId = bucket["modelId"] as? String ?? "unknown"
                             let label = modelId.contains("flash") ? "Flash" : (modelId.contains("pro") ? "Pro" : modelId)
-                            windows.append(UsageWindow(
-                                label: label,
-                                percentRemaining: Int(frac * 100),
-                                resetsAt: self.extractReset(from: bucket)))
+                            let pct = Int(frac * 100)
+                            let existing = best[label]
+                            if existing == nil || pct < existing!.percentRemaining {
+                                best[label] = UsageWindow(
+                                    label: label,
+                                    percentRemaining: pct,
+                                    resetsAt: self.extractReset(from: bucket))
+                            }
                         }
                     }
+                    let windows = ["Flash", "Pro"].compactMap { best[$0] }
+                        + best.filter { !["Flash", "Pro"].contains($0.key) }.map(\.value)
 
                     self.geminiWindows = windows
                     self.geminiError = nil
@@ -322,6 +315,7 @@ class UsageService: ObservableObject {
     // MARK: - ChatGPT Fetcher
 
     private func fetchChatGPT(session: URLSession) {
+        guard chatGptError != "Logged Out" else { return }
         guard let sessionUrl = URL(string: "https://chatgpt.com/api/auth/session") else { return }
         var sessionRequest = URLRequest(url: sessionUrl)
         sessionRequest.setValue("https://chatgpt.com", forHTTPHeaderField: "Referer")
@@ -421,6 +415,7 @@ class UsageService: ObservableObject {
     // MARK: - Claude Fetcher
 
     private func fetchClaude(session: URLSession) {
+        guard claudeError != "Logged Out" else { return }
         guard let url = URL(string: "https://claude.ai/api/organizations") else { return }
         var request = URLRequest(url: url)
         request.setValue("https://claude.ai", forHTTPHeaderField: "Referer")

@@ -4,6 +4,7 @@ import AppKit
 public struct AIAggregatorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var usageService = UsageService.shared
+    @ObservedObject private var visibility = ProvidersVisibility.shared
 
     public init() {}
 
@@ -17,8 +18,11 @@ public struct AIAggregatorApp: App {
     }
 
     private var menuBarLabel: String {
-        let parts = [usageService.chatGptCompact, usageService.claudeCompact, usageService.geminiCompact].compactMap { $0 }
-        return parts.isEmpty ? "A" : parts.joined(separator: "  ")
+        var parts: [String] = []
+        if visibility.showChatGPTStats, let c = usageService.chatGptCompact { parts.append(c) }
+        if visibility.showClaudeStats,  let c = usageService.claudeCompact  { parts.append(c) }
+        if visibility.showGeminiStats,  let c = usageService.geminiCompact  { parts.append(c) }
+        return parts.isEmpty ? "AA" : parts.joined(separator: "  ")
     }
 }
 
