@@ -25,7 +25,7 @@ class UsageService: ObservableObject {
     private var timer: Timer?
     private let googleClientId = "681255809395" + "-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
     private let googleClientSecret = "GOCSPX-4uHgMPm" + "-1o7Sk-geV6Cu5clXFsxl"
-    private let redirectUri = "https://developers.google.com/gemini-code-assist/auth_success_gemini"
+    private let redirectUri = "https://codeassist.google.com/authcode"
 
     init() {
         startPolling()

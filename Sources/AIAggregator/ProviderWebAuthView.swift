@@ -447,12 +447,12 @@ struct ProviderWebAuthView: View {
                         
                         if showOAuthInput {
                             VStack(spacing: 8) {
-                                Text("Google login opened in your browser. After signing in, you will reach a page. Paste the 'code=' value from the URL here:")
+                                Text("Google login opened in your browser. After signing in, you will reach a page. Copy the code displayed and paste it here:")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 
                                 HStack {
-                                    TextField("Paste code here...", text: $authCode)
+                                    TextField("Enter code here...", text: $authCode)
                                         .textFieldStyle(.roundedBorder)
                                     Button("Done") {
                                         let code = authCode.trimmingCharacters(in: .whitespacesAndNewlines)
