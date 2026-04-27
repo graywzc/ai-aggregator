@@ -73,6 +73,50 @@ class UsageService: ObservableObject {
         return URLSession(configuration: config)
     }
 
+    // MARK: - Logout Logic
+
+    func logoutChatGPT() {
+        clearCookies(for: "chatgpt.com") {
+            DispatchQueue.main.async {
+                self.chatGptWindows = []
+                self.chatGptError = "Logged Out"
+            }
+        }
+    }
+
+    func logoutClaude() {
+        clearCookies(for: "claude.ai") {
+            DispatchQueue.main.async {
+                self.claudeWindows = []
+                self.claudeError = "Logged Out"
+            }
+        }
+    }
+
+    func logoutGemini() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: "gemini_refresh_token"
+        ]
+        SecItemDelete(query as CFDictionary)
+        DispatchQueue.main.async {
+            self.geminiWindows = []
+            self.geminiError = "Logged Out"
+        }
+    }
+
+    private func clearCookies(for domainSuffix: String, completion: @escaping () -> Void) {
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        store.getAllCookies { cookies in
+            let group = DispatchGroup()
+            for cookie in cookies where cookie.domain.contains(domainSuffix) {
+                group.enter()
+                store.delete(cookie) { group.leave() }
+            }
+            group.notify(queue: .main) { completion() }
+        }
+    }
+
     // MARK: - Gemini OAuth Flow
 
     var googleAuthURL: URL {
@@ -139,53 +183,15 @@ class UsageService: ObservableObject {
         return nil
     }
 
-    // MARK: - Reset-time parsing helpers
-
-    private static let isoFormatterFractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let isoFormatter = ISO8601DateFormatter()
-
-    internal func parseDate(_ value: Any?) -> Date? {
-        if let s = value as? String {
-            if let d = Self.isoFormatterFractional.date(from: s) { return d }
-            if let d = Self.isoFormatter.date(from: s) { return d }
-            let stripped = s.replacingOccurrences(of: "\\.\\d+", with: "", options: .regularExpression)
-            if let d = Self.isoFormatter.date(from: stripped) { return d }
-        }
-        if let n = value as? Double, n > 1_000_000_000 {
-            return Date(timeIntervalSince1970: n)
-        }
-        return nil
-    }
-
-    internal func extractReset(from dict: [String: Any]) -> Date? {
-        for key in ["resets_at", "reset_at", "next_reset_at", "window_resets_at", "resetTime"] {
-            if let d = parseDate(dict[key]) { return d }
-        }
-        for key in ["resets_in_seconds", "seconds_until_reset", "reset_in_seconds", "reset_after_seconds"] {
-            if let n = dict[key] as? Double { return Date(timeIntervalSinceNow: n) }
-            if let n = dict[key] as? Int    { return Date(timeIntervalSinceNow: TimeInterval(n)) }
-        }
-        return nil
-    }
-
-    internal func windowLabel(seconds: Int) -> String {
-        if seconds >= 86400 { return "\(seconds / 86400)d" }
-        if seconds >= 3600  { return "\(seconds / 3600)h" }
-        if seconds >= 60    { return "\(seconds / 60)m" }
-        return "\(seconds)s"
-    }
-
     // MARK: - Fetchers
 
     private func fetchGemini(session: URLSession) {
         guard let refreshToken = getRefreshToken() else {
             DispatchQueue.main.async {
                 self.geminiWindows = []
-                self.geminiError = "Login Required"
+                if self.geminiError != "Logged Out" {
+                    self.geminiError = "Login Required"
+                }
             }
             return
         }
@@ -279,7 +285,7 @@ class UsageService: ObservableObject {
                     }
 
                     self.geminiWindows = windows
-                    self.geminiError = windows.isEmpty ? "No Limits" : nil
+                    self.geminiError = nil
                 } catch {
                     self.geminiWindows = []
                     self.geminiError = "JSON Error"
@@ -288,7 +294,7 @@ class UsageService: ObservableObject {
         }.resume()
     }
 
-    // MARK: - ChatGPT
+    // MARK: - ChatGPT Fetcher
 
     private func fetchChatGPT(session: URLSession) {
         guard let sessionUrl = URL(string: "https://chatgpt.com/api/auth/session") else { return }
@@ -300,7 +306,9 @@ class UsageService: ObservableObject {
                   let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
                 DispatchQueue.main.async {
                     self.chatGptWindows = []
-                    self.chatGptError = "Auth Error"
+                    if self.chatGptError != "Logged Out" {
+                        self.chatGptError = "Auth Error"
+                    }
                 }
                 return
             }
@@ -376,7 +384,7 @@ class UsageService: ObservableObject {
                     }
 
                     self.chatGptWindows = windows
-                    self.chatGptError = windows.isEmpty ? "No Limits" : nil
+                    self.chatGptError = nil
                 } catch {
                     self.chatGptWindows = []
                     self.chatGptError = "JSON Error"
@@ -385,7 +393,7 @@ class UsageService: ObservableObject {
         }.resume()
     }
 
-    // MARK: - Claude
+    // MARK: - Claude Fetcher
 
     private func fetchClaude(session: URLSession) {
         guard let url = URL(string: "https://claude.ai/api/organizations") else { return }
@@ -397,7 +405,9 @@ class UsageService: ObservableObject {
                   let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
                 DispatchQueue.main.async {
                     self.claudeWindows = []
-                    self.claudeError = "Auth Error"
+                    if self.claudeError != "Logged Out" {
+                        self.claudeError = "Auth Error"
+                    }
                 }
                 return
             }
@@ -458,12 +468,53 @@ class UsageService: ObservableObject {
                     }
 
                     self.claudeWindows = windows
-                    self.claudeError = windows.isEmpty ? "No Limits" : nil
+                    self.claudeError = nil
                 } catch {
                     self.claudeWindows = []
                     self.claudeError = "JSON Error"
                 }
             }
         }.resume()
+    }
+
+    // MARK: - Reset-time parsing helpers
+
+    internal func parseDate(_ value: Any?) -> Date? {
+        if let s = value as? String {
+            if let d = Self.isoFormatterFractional.date(from: s) { return d }
+            if let d = Self.isoFormatter.date(from: s) { return d }
+            let stripped = s.replacingOccurrences(of: "\\.\\d+", with: "", options: .regularExpression)
+            if let d = Self.isoFormatter.date(from: stripped) { return d }
+        }
+        if let n = value as? Double, n > 1_000_000_000 {
+            return Date(timeIntervalSince1970: n)
+        }
+        return nil
+    }
+
+    internal func extractReset(from dict: [String: Any]) -> Date? {
+        for key in ["resets_at", "reset_at", "next_reset_at", "window_resets_at", "resetTime"] {
+            if let d = parseDate(dict[key]) { return d }
+        }
+        for key in ["resets_in_seconds", "seconds_until_reset", "reset_in_seconds", "reset_after_seconds"] {
+            if let n = dict[key] as? Double { return Date(timeIntervalSinceNow: n) }
+            if let n = dict[key] as? Int    { return Date(timeIntervalSinceNow: TimeInterval(n)) }
+        }
+        return nil
+    }
+
+    internal func windowLabel(seconds: Int) -> String {
+        if seconds >= 86400 { return "\(seconds / 86400)d" }
+        if seconds >= 3600  { return "\(seconds / 3600)h" }
+        if seconds >= 60    { return "\(seconds / 60)m" }
+        return "\(seconds)s"
+    }
+
+    private func dumpJSON(_ tag: String, _ data: Data) {
+        if let obj = try? JSONSerialization.jsonObject(with: data),
+           let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
+           let str = String(data: pretty, encoding: .utf8) {
+            print("[\(tag)] \(str)")
+        }
     }
 }

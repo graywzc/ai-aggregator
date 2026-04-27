@@ -9,17 +9,20 @@ struct UsagePopoverView: View {
             ProviderSection(name: "ChatGPT",
                             windows: usageService.chatGptWindows,
                             error: usageService.chatGptError,
-                            isVisible: $visibility.showChatGPT)
+                            isVisible: $visibility.showChatGPT,
+                            onLogout: { usageService.logoutChatGPT() })
 
             ProviderSection(name: "Claude",
                             windows: usageService.claudeWindows,
                             error: usageService.claudeError,
-                            isVisible: $visibility.showClaude)
+                            isVisible: $visibility.showClaude,
+                            onLogout: { usageService.logoutClaude() })
 
             ProviderSection(name: "Gemini",
                             windows: usageService.geminiWindows,
                             error: usageService.geminiError,
-                            isVisible: $visibility.showGemini)
+                            isVisible: $visibility.showGemini,
+                            onLogout: { usageService.logoutGemini() })
 
             Divider()
 
@@ -53,19 +56,31 @@ private struct ProviderSection: View {
     let windows: [UsageWindow]
     let error: String?
     @Binding var isVisible: Bool
+    var onLogout: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(name).font(.subheadline).bold()
                 Spacer()
+                
+                if error != "Logged Out" && (error == nil || !windows.isEmpty) {
+                    Button(action: onLogout) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Logout of \(name)")
+                }
+                
                 Toggle("", isOn: $isVisible)
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
             }
             if let error = error {
-                Text(error).font(.caption).foregroundColor(.red)
+                Text(error).font(.caption).foregroundColor(error == "Logged Out" ? .secondary : .red)
             } else if !windows.isEmpty {
                 ForEach(windows) { w in
                     WindowRow(window: w)
