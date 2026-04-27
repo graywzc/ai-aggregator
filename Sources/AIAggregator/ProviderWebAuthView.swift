@@ -22,7 +22,7 @@ struct ChatAttachment: Identifiable, Equatable {
 
 // MARK: - Persistent dual WebView controller
 
-final class DualChatController: ObservableObject {
+final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate {
     let chatGPTView: WKWebView
     let claudeView: WKWebView
     let geminiView: WKWebView
@@ -30,10 +30,14 @@ final class DualChatController: ObservableObject {
     private static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
-    init() {
+    override init() {
         chatGPTView = Self.makeWebView()
         claudeView  = Self.makeWebView()
         geminiView  = Self.makeWebView()
+        super.init()
+        
+        geminiView.navigationDelegate = self
+        
         chatGPTView.load(URLRequest(url: URL(string: "https://chatgpt.com/")!))
         claudeView.load(URLRequest(url: URL(string: "https://claude.ai/new")!))
         geminiView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
@@ -48,6 +52,23 @@ final class DualChatController: ObservableObject {
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.customUserAgent = userAgent
         return wv
+    }
+    
+    // MARK: - WKNavigationDelegate (OAuth Interception)
+    
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = navigationAction.request.url,
+           url.absoluteString.hasPrefix("https://developers.google.com/gemini-code-assist/auth_success_gemini") {
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+                UsageService.shared.handleOAuthCode(code)
+                // Redirect back to Gemini app after successful login
+                webView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
+                decisionHandler(.cancel)
+                return
+            }
+        }
+        decisionHandler(.allow)
     }
 
     func send(text: String, attachments: [ChatAttachment]) {
@@ -204,9 +225,6 @@ final class DualChatController: ObservableObject {
                 input.focus();
 
                 if (useClipboardPaste) {
-                    // Quill (Gemini) re-renders from its internal Delta model, so DOM-level
-                    // changes get reverted on next tick. Find the Quill instance itself
-                    // and call its API with source='user' so Angular's binding propagates.
                     function findQuill() {
                         let el = input;
                         while (el) {
@@ -238,7 +256,6 @@ final class DualChatController: ObservableObject {
                         } catch (e) {}
                     }
                 } else {
-                    // ChatGPT (Lexical) and Claude (Tiptap/ProseMirror) accept execCommand.
                     const sel = window.getSelection();
                     sel.removeAllRanges();
                     const allRange = document.createRange();
@@ -260,7 +277,6 @@ final class DualChatController: ObservableObject {
                 input.dispatchEvent(new KeyboardEvent('keyup', opts));
             }
 
-            // Wait briefly for the paste to register and uploads to start; then set text and try sending.
             const initialDelay = files.length > 0 ? 600 : 60;
             setTimeout(() => {
                 setText();
@@ -338,7 +354,6 @@ struct MultilineInput: NSViewRepresentable {
             parent.text = tv.string
         }
 
-        // Enter -> submit. Shift+Enter -> insertLineBreak (default), which inserts a newline.
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.onSubmit()
@@ -349,7 +364,6 @@ struct MultilineInput: NSViewRepresentable {
     }
 }
 
-// NSTextView subclass with placeholder text and image/file paste handling
 final class PaddedTextView: NSTextView {
     var placeholderString: String = "" { didSet { needsDisplay = true } }
     var onPasteAttachments: (([ChatAttachment]) -> Void)?
@@ -367,9 +381,6 @@ final class PaddedTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // LSUIElement apps have no main menu, so the system doesn't auto-route
-        // standard editing shortcuts. Wire them here. WebViews handle their
-        // own Cmd+V via internal key handling, so this only affects PaddedTextView.
         if event.modifierFlags.contains(.command),
            event.modifierFlags.contains(.shift) == false {
             switch event.charactersIgnoringModifiers {
@@ -390,10 +401,6 @@ final class PaddedTextView: NSTextView {
 
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
-
-        // 1. Raw image data (screenshots, "Copy Image" from a browser).
-        //    Check this BEFORE file URLs, because browsers put both image data and
-        //    the source http URL on the pasteboard, and we want the image, not the URL.
         let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
         if let type = pb.availableType(from: imageTypes), let data = pb.data(forType: type) {
             let (bytes, mime, ext) = PaddedTextView.normalizeImageData(data, type: type)
@@ -404,8 +411,6 @@ final class PaddedTextView: NSTextView {
             return
         }
 
-        // 2. File URLs (e.g. copied from Finder). Restrict to file:// only so we don't
-        //    try to network-fetch http URLs from web pages.
         let opts: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: opts) as? [URL], !urls.isEmpty {
             let atts = urls.compactMap { ChatAttachment.load(from: $0) }
@@ -442,19 +447,21 @@ struct ProviderWebAuthView: View {
             HSplitView {
                 if visibility.showChatGPT {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "ChatGPT")
+                        HeaderBar(title: "ChatGPT", showUsageLogin: false)
                         WebViewHost(webView: controller.chatGPTView)
                     }
                 }
                 if visibility.showClaude {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "Claude")
+                        HeaderBar(title: "Claude", showUsageLogin: false)
                         WebViewHost(webView: controller.claudeView)
                     }
                 }
                 if visibility.showGemini {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "Gemini")
+                        HeaderBar(title: "Gemini", showUsageLogin: true) {
+                            controller.geminiView.load(URLRequest(url: UsageService.shared.googleAuthURL))
+                        }
                         WebViewHost(webView: controller.geminiView)
                     }
                 }
@@ -477,7 +484,7 @@ struct ProviderWebAuthView: View {
                     .help("Attach files")
 
                     MultilineInput(text: $inputText,
-                                   placeholder: "Ask all enabled chats…  (Enter to send · Shift+Enter for newline)",
+                                   placeholder: "Ask all enabled chats…",
                                    onSubmit: send,
                                    onPasteAttachments: { atts in attachments.append(contentsOf: atts) })
                         .frame(minHeight: 36, maxHeight: 140)
@@ -541,10 +548,20 @@ struct ProviderWebAuthView: View {
 
 private struct HeaderBar: View {
     let title: String
+    let showUsageLogin: Bool
+    var onUsageLogin: (() -> Void)? = nil
+    
     var body: some View {
         HStack {
             Text(title).font(.headline)
             Spacer()
+            if showUsageLogin {
+                Button("Sign in for Usage Stats") {
+                    onUsageLogin?()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
