@@ -479,6 +479,13 @@ class UsageService: ObservableObject {
 
     // MARK: - Reset-time parsing helpers
 
+    private static let isoFormatterFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoFormatter = ISO8601DateFormatter()
+
     internal func parseDate(_ value: Any?) -> Date? {
         if let s = value as? String {
             if let d = Self.isoFormatterFractional.date(from: s) { return d }
