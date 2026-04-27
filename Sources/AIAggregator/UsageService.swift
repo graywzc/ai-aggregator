@@ -301,7 +301,7 @@ class UsageService: ObservableObject {
 
     private func fetchGemini(session: URLSession) {
         // First get the user config/project info
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist") else { return }
+        guard let url = URL(string: "https://gemini.google.com/app/v1internal:loadCodeAssist") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = "{}".data(using: .utf8)
@@ -336,7 +336,7 @@ class UsageService: ObservableObject {
     }
 
     private func fetchGeminiUsage(session: URLSession, projectId: String) {
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else { return }
+        guard let url = URL(string: "https://gemini.google.com/app/v1internal:retrieveUserQuota") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         let body: [String: Any] = ["project": projectId]
