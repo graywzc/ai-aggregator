@@ -17,7 +17,7 @@ public struct AIAggregatorApp: App {
     }
 
     private var menuBarLabel: String {
-        let parts = [usageService.chatGptCompact, usageService.claudeCompact].compactMap { $0 }
+        let parts = [usageService.chatGptCompact, usageService.claudeCompact, usageService.geminiCompact].compactMap { $0 }
         return parts.isEmpty ? "A" : parts.joined(separator: "  ")
     }
 }

@@ -17,8 +17,8 @@ struct UsagePopoverView: View {
                             isVisible: $visibility.showClaude)
 
             ProviderSection(name: "Gemini",
-                            windows: [],
-                            error: nil,
+                            windows: usageService.geminiWindows,
+                            error: usageService.geminiError,
                             isVisible: $visibility.showGemini)
 
             Divider()
@@ -75,7 +75,7 @@ private struct WindowRow: View {
     var body: some View {
         HStack(spacing: 4) {
             Text("\(window.label):")
-                .frame(width: 30, alignment: .leading)
+                .frame(width: 45, alignment: .leading)
                 .foregroundColor(.secondary)
             Text("\(window.percentRemaining)%")
                 .foregroundColor(color)
