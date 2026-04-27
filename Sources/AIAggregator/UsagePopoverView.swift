@@ -27,7 +27,17 @@ struct UsagePopoverView: View {
                 Button("Login to Providers") {
                     WindowManager.shared.showLoginWindow()
                 }
+                
                 Spacer()
+                
+                if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+                    Text("v\(version)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)
                 }

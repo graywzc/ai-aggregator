@@ -36,8 +36,6 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         geminiView  = Self.makeWebView()
         super.init()
         
-        geminiView.navigationDelegate = self
-        
         chatGPTView.load(URLRequest(url: URL(string: "https://chatgpt.com/")!))
         claudeView.load(URLRequest(url: URL(string: "https://claude.ai/new")!))
         geminiView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
@@ -54,32 +52,6 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         return wv
     }
     
-    // MARK: - WKNavigationDelegate (OAuth Interception)
-    
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let url = navigationAction.request.url {
-            let urlString = url.absoluteString
-            
-            // 1. Intercept the Success Callback
-            if urlString.hasPrefix("https://developers.google.com/gemini-code-assist/auth_success_gemini") {
-                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                   let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
-                    UsageService.shared.handleOAuthCode(code)
-                    webView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
-                    decisionHandler(.cancel)
-                    return
-                }
-            }
-            
-            // 2. Allow navigation to Google Auth and its sub-domains
-            if urlString.contains("accounts.google.com") || urlString.contains("google.com/o/oauth2") {
-                decisionHandler(.allow)
-                return
-            }
-        }
-        decisionHandler(.allow)
-    }
-
     func send(text: String, attachments: [ChatAttachment]) {
         guard !text.isEmpty || !attachments.isEmpty else { return }
         let attachmentsJSON = encodeAttachments(attachments)
@@ -306,7 +278,7 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
     }
 }
 
-// MARK: - Custom multi-line input (Enter=send, Shift+Enter=newline)
+// MARK: - Custom multi-line input
 
 struct MultilineInput: NSViewRepresentable {
     @Binding var text: String
@@ -446,6 +418,10 @@ struct ProviderWebAuthView: View {
     @State private var inputText: String = ""
     @State private var attachments: [ChatAttachment] = []
     @State private var isDropTargeted: Bool = false
+    
+    // OAuth states
+    @State private var authCode: String = ""
+    @State private var showOAuthInput: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -465,8 +441,34 @@ struct ProviderWebAuthView: View {
                 if visibility.showGemini {
                     VStack(spacing: 0) {
                         HeaderBar(title: "Gemini", showUsageLogin: true) {
-                            controller.geminiView.load(URLRequest(url: UsageService.shared.googleAuthURL))
+                            NSWorkspace.shared.open(UsageService.shared.googleAuthURL)
+                            showOAuthInput = true
                         }
+                        
+                        if showOAuthInput {
+                            VStack(spacing: 8) {
+                                Text("Google login opened in your browser. After signing in, you will reach a page. Paste the 'code=' value from the URL here:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                HStack {
+                                    TextField("Paste code here...", text: $authCode)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button("Done") {
+                                        let code = authCode.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        if !code.isEmpty {
+                                            UsageService.shared.handleOAuthCode(code)
+                                            showOAuthInput = false
+                                            authCode = ""
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+                            }
+                            .padding()
+                            .background(Color.accentColor.opacity(0.05))
+                        }
+                        
                         WebViewHost(webView: controller.geminiView)
                     }
                 }
