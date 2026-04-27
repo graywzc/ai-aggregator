@@ -11,9 +11,9 @@ A macOS menu bar application that aggregates and displays your current usage lim
 
 ## Installation
 
-### Via Homebrew (Recommended)
+### Via Homebrew (Highly Recommended)
 
-To install and keep the app updated easily:
+This is the easiest way to install and stay updated. It also automatically handles the macOS "damaged app" error by re-signing the binary locally.
 
 ```bash
 brew install graywzc/tap/ai-aggregator
@@ -23,9 +23,10 @@ brew install graywzc/tap/ai-aggregator
 
 1. Download the latest `AIAggregator.zip` from the [Releases](https://github.com/graywzc/ai-aggregator/releases) page.
 2. Unzip and move `AIAggregator.app` to your `/Applications` folder.
-3. **Important**: Because the app is ad-hoc signed, you may need to run the following command in your terminal to allow it to run:
+3. If you see a "damaged" or "unverified developer" error, run these commands in your terminal:
    ```bash
    xattr -cr /Applications/AIAggregator.app
+   codesign --force --deep --sign - /Applications/AIAggregator.app
    ```
 4. Right-click the app and select **Open** for the first time.
 
