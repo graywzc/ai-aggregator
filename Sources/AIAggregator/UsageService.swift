@@ -139,6 +139,46 @@ class UsageService: ObservableObject {
         return nil
     }
 
+    // MARK: - Reset-time parsing helpers
+
+    private static let isoFormatterFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    internal func parseDate(_ value: Any?) -> Date? {
+        if let s = value as? String {
+            if let d = Self.isoFormatterFractional.date(from: s) { return d }
+            if let d = Self.isoFormatter.date(from: s) { return d }
+            let stripped = s.replacingOccurrences(of: "\\.\\d+", with: "", options: .regularExpression)
+            if let d = Self.isoFormatter.date(from: stripped) { return d }
+        }
+        if let n = value as? Double, n > 1_000_000_000 {
+            return Date(timeIntervalSince1970: n)
+        }
+        return nil
+    }
+
+    internal func extractReset(from dict: [String: Any]) -> Date? {
+        for key in ["resets_at", "reset_at", "next_reset_at", "window_resets_at", "resetTime"] {
+            if let d = parseDate(dict[key]) { return d }
+        }
+        for key in ["resets_in_seconds", "seconds_until_reset", "reset_in_seconds", "reset_after_seconds"] {
+            if let n = dict[key] as? Double { return Date(timeIntervalSinceNow: n) }
+            if let n = dict[key] as? Int    { return Date(timeIntervalSinceNow: TimeInterval(n)) }
+        }
+        return nil
+    }
+
+    internal func windowLabel(seconds: Int) -> String {
+        if seconds >= 86400 { return "\(seconds / 86400)d" }
+        if seconds >= 3600  { return "\(seconds / 3600)h" }
+        if seconds >= 60    { return "\(seconds / 60)m" }
+        return "\(seconds)s"
+    }
+
     // MARK: - Fetchers
 
     private func fetchGemini(session: URLSession) {
@@ -248,8 +288,8 @@ class UsageService: ObservableObject {
         }.resume()
     }
 
-    // MARK: - Remaining Fetchers (ChatGPT/Claude)
-    
+    // MARK: - ChatGPT
+
     private func fetchChatGPT(session: URLSession) {
         guard let sessionUrl = URL(string: "https://chatgpt.com/api/auth/session") else { return }
         var sessionRequest = URLRequest(url: sessionUrl)
@@ -345,6 +385,8 @@ class UsageService: ObservableObject {
         }.resume()
     }
 
+    // MARK: - Claude
+
     private func fetchClaude(session: URLSession) {
         guard let url = URL(string: "https://claude.ai/api/organizations") else { return }
         var request = URLRequest(url: url)
@@ -423,15 +465,5 @@ class UsageService: ObservableObject {
                 }
             }
         }.resume()
-    }
-
-    // MARK: - Reset-time parsing helpers (repeated for consistency)
-
-    private func dumpJSON(_ tag: String, _ data: Data) {
-        if let obj = try? JSONSerialization.jsonObject(with: data),
-           let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
-           let str = String(data: pretty, encoding: .utf8) {
-            print("[\(tag)] \(str)")
-        }
     }
 }
