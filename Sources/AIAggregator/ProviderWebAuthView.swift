@@ -57,14 +57,23 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
     // MARK: - WKNavigationDelegate (OAuth Interception)
     
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let url = navigationAction.request.url,
-           url.absoluteString.hasPrefix("https://developers.google.com/gemini-code-assist/auth_success_gemini") {
-            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-               let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
-                UsageService.shared.handleOAuthCode(code)
-                // Redirect back to Gemini app after successful login
-                webView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
-                decisionHandler(.cancel)
+        if let url = navigationAction.request.url {
+            let urlString = url.absoluteString
+            
+            // 1. Intercept the Success Callback
+            if urlString.hasPrefix("https://developers.google.com/gemini-code-assist/auth_success_gemini") {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+                    UsageService.shared.handleOAuthCode(code)
+                    webView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
+                    decisionHandler(.cancel)
+                    return
+                }
+            }
+            
+            // 2. Allow navigation to Google Auth and its sub-domains
+            if urlString.contains("accounts.google.com") || urlString.contains("google.com/o/oauth2") {
+                decisionHandler(.allow)
                 return
             }
         }
@@ -177,7 +186,6 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
                 return out;
             }
 
-            // Files via simulated paste event (works for ChatGPT and Gemini).
             if (files.length > 0) {
                 const dt = new DataTransfer();
                 for (const file of buildFiles()) dt.items.add(file);
@@ -186,9 +194,6 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
                 input.dispatchEvent(evt);
             }
 
-            // Claude/Tiptap rejects synthetic paste events (isTrusted check). Walk up
-            // from the chat input to the nearest <input type="file"> and assign files
-            // directly, mimicking the paperclip-button flow.
             if (useFileInputFallback && files.length > 0) {
                 setTimeout(() => {
                     let host = input;
@@ -556,8 +561,11 @@ private struct HeaderBar: View {
             Text(title).font(.headline)
             Spacer()
             if showUsageLogin {
-                Button("Sign in for Usage Stats") {
-                    onUsageLogin?()
+                Button(action: { onUsageLogin?() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "key.fill")
+                        Text("Sign in for Usage Stats")
+                    }
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
