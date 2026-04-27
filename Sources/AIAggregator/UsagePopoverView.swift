@@ -4,43 +4,63 @@ struct UsagePopoverView: View {
     @StateObject private var usageService = UsageService.shared
     @StateObject private var visibility = ProvidersVisibility.shared
 
+    private var anyChatsEnabled: Bool {
+        (usageService.chatGptError == nil && !usageService.chatGptWindows.isEmpty && visibility.showChatGPT)
+            || (usageService.claudeError == nil && !usageService.claudeWindows.isEmpty && visibility.showClaude)
+            || (usageService.geminiError == nil && !usageService.geminiWindows.isEmpty && visibility.showGemini)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ProviderSection(name: "ChatGPT",
-                            windows: usageService.chatGptWindows,
-                            error: usageService.chatGptError,
-                            isVisible: $visibility.showChatGPT,
-                            onLogout: { usageService.logoutChatGPT() })
+            ProviderSection(
+                name: "ChatGPT",
+                windows: usageService.chatGptWindows,
+                error: usageService.chatGptError,
+                isChatOn: $visibility.showChatGPT,
+                isStatsOn: $visibility.showChatGPTStats,
+                onLogout: { usageService.logoutChatGPT() },
+                onLogin: { WindowManager.shared.showAuthWindow(for: .chatGPT) }
+            )
 
-            ProviderSection(name: "Claude",
-                            windows: usageService.claudeWindows,
-                            error: usageService.claudeError,
-                            isVisible: $visibility.showClaude,
-                            onLogout: { usageService.logoutClaude() })
+            ProviderSection(
+                name: "Claude",
+                windows: usageService.claudeWindows,
+                error: usageService.claudeError,
+                isChatOn: $visibility.showClaude,
+                isStatsOn: $visibility.showClaudeStats,
+                onLogout: { usageService.logoutClaude() },
+                onLogin: { WindowManager.shared.showAuthWindow(for: .claude) }
+            )
 
-            ProviderSection(name: "Gemini",
-                            windows: usageService.geminiWindows,
-                            error: usageService.geminiError,
-                            isVisible: $visibility.showGemini,
-                            onLogout: { usageService.logoutGemini() })
+            ProviderSection(
+                name: "Gemini",
+                windows: usageService.geminiWindows,
+                error: usageService.geminiError,
+                isChatOn: $visibility.showGemini,
+                isStatsOn: $visibility.showGeminiStats,
+                onLogout: { usageService.logoutGemini() },
+                onLogin: { WindowManager.shared.showGeminiAuthWindow() }
+            )
 
             Divider()
 
             HStack {
-                Button("Login to Providers") {
-                    WindowManager.shared.showLoginWindow()
+                if anyChatsEnabled {
+                    Button("Aggregated Chats") {
+                        WindowManager.shared.showLoginWindow()
+                    }
                 }
-                
+
                 Spacer()
-                
+
                 if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
                     Text("v\(version)")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
-                
+
                 Spacer()
-                
+
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)
                 }
@@ -55,16 +75,22 @@ private struct ProviderSection: View {
     let name: String
     let windows: [UsageWindow]
     let error: String?
-    @Binding var isVisible: Bool
+    @Binding var isChatOn: Bool
+    @Binding var isStatsOn: Bool
     var onLogout: () -> Void
+    var onLogin: () -> Void
+
+    private var isLoggedIn: Bool {
+        error == nil && !windows.isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 8) {
                 Text(name).font(.subheadline).bold()
                 Spacer()
-                
-                if error != "Logged Out" && (error == nil || !windows.isEmpty) {
+
+                if isLoggedIn {
                     Button(action: onLogout) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
                             .font(.system(size: 10))
@@ -72,16 +98,22 @@ private struct ProviderSection: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Logout of \(name)")
+
+                    Text("Chat").font(.caption2).foregroundColor(.secondary)
+                    Toggle("", isOn: $isChatOn)
+                        .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+
+                    Text("Stats").font(.caption2).foregroundColor(.secondary)
+                    Toggle("", isOn: $isStatsOn)
+                        .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                } else if error != nil {
+                    Button("Login") { onLogin() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
-                
-                Toggle("", isOn: $isVisible)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
             }
-            if let error = error {
-                Text(error).font(.caption).foregroundColor(error == "Logged Out" ? .secondary : .red)
-            } else if !windows.isEmpty {
+
+            if isLoggedIn && isStatsOn {
                 ForEach(windows) { w in
                     WindowRow(window: w)
                 }
