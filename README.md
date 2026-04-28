@@ -2,6 +2,10 @@
 
 A macOS menu bar application that aggregates and displays your current usage limits and remaining quota for various AI services, such as ChatGPT and Claude.
 
+## Demo
+
+<video src="https://github.com/graywzc/ai-aggregator/releases/download/v1.2.0/demo.mov" controls width="100%"></video>
+
 ## Features
 
 - **Menu Bar Integration**: Real-time usage percentages (e.g., "39%/35%") displayed directly in your macOS menu bar.
