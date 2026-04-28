@@ -1,5 +1,11 @@
 # AI Aggregator
 
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![Swift](https://img.shields.io/badge/swift-5.9-orange)
+![License](https://img.shields.io/github/license/graywzc/ai-aggregator)
+![Release](https://img.shields.io/github/v/release/graywzc/ai-aggregator)
+![Downloads](https://img.shields.io/github/downloads/graywzc/ai-aggregator/total)
+
 A macOS menu bar application that aggregates and displays your current usage limits and remaining quota for various AI services, such as ChatGPT and Claude.
 
 ## Demo
