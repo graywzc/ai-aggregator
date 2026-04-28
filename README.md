@@ -4,9 +4,9 @@ A macOS menu bar application that aggregates and displays your current usage lim
 
 ## Demo
 
-[![Demo 2](demo2_thumb.png)](https://github.com/graywzc/ai-aggregator/releases/download/v1.2.0/demo2.mp4)
+<video src="https://github.com/user-attachments/assets/5789b285-eb9b-46d5-b501-3423fe5c5a3b" controls width="100%"></video>
 
-[![Demo 1](demo_thumb.png)](https://github.com/graywzc/ai-aggregator/releases/download/v1.2.0/demo.mp4)
+<video src="https://github.com/user-attachments/assets/8bc18180-8021-416e-94e3-1bae871b5c20" controls width="100%"></video>
 
 ## Features
 
