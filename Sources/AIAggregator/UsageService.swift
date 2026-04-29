@@ -10,6 +10,13 @@ struct UsageWindow: Identifiable {
     let resetsAt: Date?
 }
 
+func formatResetDate(_ date: Date, relativeTo now: Date = Date()) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "EEE HH:mm"
+    return formatter.string(from: date)
+}
+
 class UsageService: ObservableObject {
     static let shared = UsageService()
 

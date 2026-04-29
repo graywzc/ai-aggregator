@@ -8,7 +8,9 @@ APP_RESOURCES = $(APP_CONTENTS)/Resources
 
 all: $(APP_BUNDLE)
 
-$(APP_BUNDLE): Info.plist
+SWIFT_SOURCES = $(shell find Sources -name "*.swift")
+
+$(APP_BUNDLE): Info.plist $(SWIFT_SOURCES)
 	@mkdir -p $(APP_MACOS)
 	@mkdir -p $(APP_RESOURCES)
 	swift build -c release

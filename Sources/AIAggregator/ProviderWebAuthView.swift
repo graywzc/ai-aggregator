@@ -579,12 +579,7 @@ private struct HeaderBar: View {
         .background(Color(NSColor.windowBackgroundColor))
     }
 
-    private func formatReset(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: Date()) ? "HH:mm" : "EEE HH:mm"
-        return formatter.string(from: date)
-    }
+    private func formatReset(_ date: Date) -> String { formatResetDate(date) }
 }
 
 struct WebViewHost: NSViewRepresentable {
