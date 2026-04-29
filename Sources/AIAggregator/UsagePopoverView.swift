@@ -146,11 +146,5 @@ private struct WindowRow: View {
         .font(.system(size: 12, design: .monospaced))
     }
 
-    private func formatReset(_ date: Date) -> String {
-        let cal = Calendar.current
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = cal.isDate(date, inSameDayAs: Date()) ? "HH:mm" : "EEE HH:mm"
-        return formatter.string(from: date)
-    }
+    private func formatReset(_ date: Date) -> String { formatResetDate(date) }
 }
