@@ -34,7 +34,7 @@ class WindowManager {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "AI Chat"
+            window.title = "Aggregated Chats"
             window.contentViewController = hostingController
             window.center()
             window.setFrameAutosaveName("ProviderLoginWindow")
