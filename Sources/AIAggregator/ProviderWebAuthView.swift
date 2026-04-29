@@ -186,6 +186,7 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         config.websiteDataStore = WKWebsiteDataStore.default()
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.customUserAgent = userAgent
+        if #available(macOS 13.3, *) { wv.isInspectable = true }
         return wv
     }
     
@@ -413,6 +414,102 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         """
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
+
+    static func findJS(for query: String) -> String? {
+        guard let data = try? JSONEncoder().encode(query),
+              let qJSON = String(data: data, encoding: .utf8) else { return nil }
+        return """
+        (function(){
+            if(window.__fc)window.__fc();
+            var q=\(qJSON),lq=q.toLowerCase(),ql=q.length;
+            var ranges=[];
+            var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{
+                acceptNode:function(n){
+                    var t=n.parentElement&&n.parentElement.tagName;
+                    return(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT')
+                        ?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;
+                }
+            });
+            var node;
+            while(node=walker.nextNode()){
+                var txt=node.textContent.toLowerCase(),idx=0;
+                while((idx=txt.indexOf(lq,idx))!==-1){
+                    var r=document.createRange();
+                    r.setStart(node,idx);r.setEnd(node,idx+ql);
+                    ranges.push(r);idx++;
+                }
+            }
+            var marks=[];
+            for(var i=ranges.length-1;i>=0;i--){
+                try{
+                    var m=document.createElement('mark');
+                    m.setAttribute('data-find','');
+                    m.style.cssText='background:rgba(255,213,0,0.55);color:inherit;border-radius:2px;padding:0;';
+                    ranges[i].surroundContents(m);
+                    marks.unshift(m);
+                }catch(e){}
+            }
+            var cur=0;
+            function hl(i){
+                marks.forEach(function(m,j){
+                    m.style.background=j===i?'rgba(255,120,0,0.85)':'rgba(255,213,0,0.55)';
+                });
+                if(marks[i])marks[i].scrollIntoView({block:'center',behavior:'smooth'});
+            }
+            if(marks.length)hl(0);
+            window.__fn=function(){if(!marks.length)return;cur=(cur+1)%marks.length;hl(cur);};
+            window.__fp=function(){if(!marks.length)return;cur=(cur-1+marks.length)%marks.length;hl(cur);};
+            window.__fc=function(){
+                marks.forEach(function(m){
+                    var p=m.parentNode;
+                    if(p){
+                        p.replaceChild(document.createTextNode(m.textContent),m);
+                        p.normalize();
+                    }
+                });
+                delete window.__fn;delete window.__fp;delete window.__fc;
+            };
+            return marks.length;
+        })()
+        """
+    }
+
+    func initFind(_ query: String, completion: @escaping (Int) -> Void) {
+        guard !query.isEmpty, let js = Self.findJS(for: query) else { clearFind(); completion(0); return }
+        let v = ProvidersVisibility.shared
+        let webViews: [WKWebView] = [
+            v.showChatGPT ? chatGPTView : nil,
+            v.showClaude  ? claudeView  : nil,
+            v.showGemini  ? geminiView  : nil
+        ].compactMap { $0 }
+        var total = 0
+        let group = DispatchGroup()
+        for wv in webViews {
+            group.enter()
+            wv.evaluateJavaScript(js) { result, error in
+                if let error { print("[Find] JS error: \(error)") }
+                if let n = result as? Int { total += n }
+                else { print("[Find] unexpected result: \(String(describing: result))") }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { completion(total) }
+    }
+
+    func navigateFind(forward: Bool) {
+        let js = forward ? "if(window.__fn)window.__fn();" : "if(window.__fp)window.__fp();"
+        let v = ProvidersVisibility.shared
+        if v.showChatGPT { chatGPTView.evaluateJavaScript(js, completionHandler: nil) }
+        if v.showClaude  { claudeView.evaluateJavaScript(js, completionHandler: nil) }
+        if v.showGemini  { geminiView.evaluateJavaScript(js, completionHandler: nil) }
+    }
+
+    func clearFind() {
+        let js = "if(window.__fc)window.__fc();"
+        for wv in [chatGPTView, claudeView, geminiView] {
+            wv.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
 }
 
 // MARK: - Custom multi-line input
@@ -550,6 +647,41 @@ final class PaddedTextView: NSTextView {
     }
 }
 
+// MARK: - Find-in-page state
+
+@MainActor
+final class FindController: ObservableObject {
+    @Published var isVisible = false
+    @Published var query = ""
+    @Published var matchCount = 0
+    private var eventMonitor: Any?
+
+    func install() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers == "f" {
+                Task { @MainActor in self.isVisible = true }
+                return nil
+            }
+            if event.keyCode == 53, self.isVisible {
+                Task { @MainActor in
+                    self.isVisible = false
+                    self.query = ""
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    func uninstall() {
+        if let m = eventMonitor { NSEvent.removeMonitor(m) }
+        eventMonitor = nil
+    }
+}
+
 // MARK: - Main view
 
 struct ProviderWebAuthView: View {
@@ -557,77 +689,104 @@ struct ProviderWebAuthView: View {
     @StateObject private var visibility   = ProvidersVisibility.shared
     @StateObject private var usageService = UsageService.shared
     @StateObject private var sessionStore = ChatSessionStore.shared
+    @StateObject private var find = FindController()
     @State private var inputText: String  = ""
     @State private var attachments: [ChatAttachment] = []
     @State private var isDropTargeted: Bool = false
     @State private var isFullScreen: Bool   = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HSplitView {
-                if visibility.showChatGPT {
-                    VStack(spacing: 0) {
-                        HeaderBar(title: "ChatGPT", windows: usageService.chatGptWindows, isFullScreen: isFullScreen)
-                        WebViewHost(webView: controller.chatGPTView)
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 0) {
+                HSplitView {
+                    if visibility.showChatGPT {
+                        VStack(spacing: 0) {
+                            HeaderBar(title: "ChatGPT", windows: usageService.chatGptWindows, isFullScreen: isFullScreen)
+                            WebViewHost(webView: controller.chatGPTView)
+                        }
+                    }
+                    if visibility.showClaude {
+                        VStack(spacing: 0) {
+                            HeaderBar(title: "Claude", windows: usageService.claudeWindows, isFullScreen: isFullScreen)
+                            WebViewHost(webView: controller.claudeView)
+                        }
+                    }
+                    if visibility.showGemini {
+                        VStack(spacing: 0) {
+                            HeaderBar(title: "Gemini", windows: usageService.geminiWindows, isFullScreen: isFullScreen)
+                            WebViewHost(webView: controller.geminiView)
+                        }
                     }
                 }
-                if visibility.showClaude {
-                    VStack(spacing: 0) {
-                        HeaderBar(title: "Claude", windows: usageService.claudeWindows, isFullScreen: isFullScreen)
-                        WebViewHost(webView: controller.claudeView)
+                .id(splitterKey)
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+                    isFullScreen = true
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+                    isFullScreen = false
+                }
+
+                Divider()
+
+                VStack(spacing: 6) {
+                    SessionBar(controller: controller, sessionStore: sessionStore)
+
+                    if !attachments.isEmpty {
+                        AttachmentChipBar(attachments: $attachments)
+                    }
+
+                    HStack(alignment: .bottom, spacing: 8) {
+                        Button(action: pickFiles) {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 16))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Attach files")
+
+                        MultilineInput(text: $inputText,
+                                       placeholder: "Ask all enabled chats…",
+                                       onSubmit: send,
+                                       onPasteAttachments: { atts in attachments.append(contentsOf: atts) })
+                            .frame(minHeight: 36, maxHeight: 140)
+
+                        Button("Send", action: send)
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .disabled(canSend == false)
                     }
                 }
-                if visibility.showGemini {
-                    VStack(spacing: 0) {
-                        HeaderBar(title: "Gemini", windows: usageService.geminiWindows, isFullScreen: isFullScreen)
-                        WebViewHost(webView: controller.geminiView)
+                .padding(10)
+                .background(isDropTargeted ? Color.accentColor.opacity(0.15) : Color.clear)
+                .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+                    handleDrop(providers: providers)
+                }
+            }
+            .frame(minWidth: 1500, minHeight: 700)
+
+            if find.isVisible {
+                FindBar(
+                    query: $find.query,
+                    matchCount: find.matchCount,
+                    onNext: { controller.navigateFind(forward: true) },
+                    onPrevious: { controller.navigateFind(forward: false) },
+                    onDismiss: {
+                        find.isVisible = false
+                        find.query = ""
+                        controller.clearFind()
                     }
-                }
-            }
-            .id(splitterKey)
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
-                isFullScreen = true
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
-                isFullScreen = false
-            }
-
-            Divider()
-
-            VStack(spacing: 6) {
-                SessionBar(controller: controller, sessionStore: sessionStore)
-
-                if !attachments.isEmpty {
-                    AttachmentChipBar(attachments: $attachments)
-                }
-
-                HStack(alignment: .bottom, spacing: 8) {
-                    Button(action: pickFiles) {
-                        Image(systemName: "paperclip")
-                            .font(.system(size: 16))
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Attach files")
-
-                    MultilineInput(text: $inputText,
-                                   placeholder: "Ask all enabled chats…",
-                                   onSubmit: send,
-                                   onPasteAttachments: { atts in attachments.append(contentsOf: atts) })
-                        .frame(minHeight: 36, maxHeight: 140)
-
-                    Button("Send", action: send)
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(canSend == false)
-                }
-            }
-            .padding(10)
-            .background(isDropTargeted ? Color.accentColor.opacity(0.15) : Color.clear)
-            .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
-                handleDrop(providers: providers)
+                )
+                .padding(12)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .frame(minWidth: 1500, minHeight: 700)
-        .onAppear { setupSessionCapture() }
+        .animation(.easeInOut(duration: 0.15), value: find.isVisible)
+        .onAppear { setupSessionCapture(); find.install() }
+        .onDisappear { find.uninstall() }
+        .onChange(of: find.isVisible) { visible in
+            if !visible { controller.clearFind() }
+        }
+        .onChange(of: find.query) { query in
+            controller.initFind(query) { find.matchCount = $0 }
+        }
     }
 
     private var splitterKey: String {
@@ -879,6 +1038,58 @@ private struct HeaderBar: View {
     }
 
     private func formatReset(_ date: Date) -> String { formatResetDate(date) }
+}
+
+private struct FindBar: View {
+    @Binding var query: String
+    let matchCount: Int
+    let onNext: () -> Void
+    let onPrevious: () -> Void
+    let onDismiss: () -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Find in page…", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+                .focused($focused)
+                .onSubmit { onNext() }
+
+            if !query.isEmpty {
+                Text(matchCount == 0 ? "No results" : "\(matchCount) matches")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 70, alignment: .leading)
+            }
+
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.borderless)
+            .disabled(query.isEmpty || matchCount == 0)
+            .help("Previous match (⌘⇧G)")
+
+            Button(action: onNext) {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .disabled(query.isEmpty || matchCount == 0)
+            .help("Next match (⌘G)")
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Close (Esc)")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+        .onAppear { focused = true }
+    }
 }
 
 struct WebViewHost: NSViewRepresentable {
