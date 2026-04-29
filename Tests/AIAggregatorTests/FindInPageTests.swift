@@ -74,6 +74,9 @@ private func makeContext(html: String) -> JSContext {
                          parentNode: null,
                          scrollIntoView: function() {} };
             },
+            createTextNode: function(text) {
+                return { textContent: text };
+            },
             body: {}
         };
         window = this;
