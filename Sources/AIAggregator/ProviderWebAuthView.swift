@@ -34,6 +34,19 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
     let claudeView: WKWebView
     let geminiView: WKWebView
 
+    @Published var chatGPTCurrentURL: URL?
+    @Published var claudeCurrentURL: URL?
+    @Published var geminiCurrentURL: URL?
+
+    // Post-send URL watching
+    private var watchingForURLChange = false
+    private var pendingSessionName: String?
+    private var baselineChatGPTURL: URL?
+    private var baselineClaudeURL: URL?
+    private var baselineGeminiURL: URL?
+    private var urlWatchTimeout: DispatchWorkItem?
+    var onSessionURLsReady: ((String, URL?, URL?, URL?) -> Void)?
+
     private static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
@@ -42,6 +55,10 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         claudeView  = Self.makeWebView()
         geminiView  = Self.makeWebView()
         super.init()
+
+        chatGPTView.addObserver(self, forKeyPath: #keyPath(WKWebView.url), options: .new, context: nil)
+        claudeView.addObserver(self,  forKeyPath: #keyPath(WKWebView.url), options: .new, context: nil)
+        geminiView.addObserver(self,  forKeyPath: #keyPath(WKWebView.url), options: .new, context: nil)
 
         chatGPTView.load(URLRequest(url: URL(string: "https://chatgpt.com/")!))
         claudeView.load(URLRequest(url: URL(string: "https://claude.ai/new")!))
@@ -65,6 +82,102 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         geminiView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
     }
 
+    func navigate(to session: ChatSession) {
+        cancelURLWatch()
+        print("[Session] navigate to '\(session.name)'")
+        print("[Session]   chatGPT: \(session.chatGPTURL ?? "nil")")
+        print("[Session]   claude:  \(session.claudeURL ?? "nil")")
+        print("[Session]   gemini:  \(session.geminiURL ?? "nil")")
+        if let str = session.chatGPTURL, let url = URL(string: str) {
+            chatGPTView.load(URLRequest(url: url))
+        }
+        if let str = session.claudeURL, let url = URL(string: str) {
+            claudeView.load(URLRequest(url: url))
+        }
+        if let str = session.geminiURL, let url = URL(string: str) {
+            geminiView.load(URLRequest(url: url))
+        }
+    }
+
+    func navigateToHomepages() {
+        cancelURLWatch()
+        chatGPTView.load(URLRequest(url: URL(string: "https://chatgpt.com/")!))
+        claudeView.load(URLRequest(url: URL(string: "https://claude.ai/new")!))
+        geminiView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
+    }
+
+    func startWatchingForConversationURLs(name: String) {
+        cancelURLWatch()
+        baselineChatGPTURL = chatGPTCurrentURL
+        baselineClaudeURL  = claudeCurrentURL
+        baselineGeminiURL  = geminiCurrentURL
+        pendingSessionName = name
+        watchingForURLChange = true
+        print("[Session] watching for URL changes after send (baseline: \(chatGPTCurrentURL?.absoluteString ?? "nil"), \(claudeCurrentURL?.absoluteString ?? "nil"), \(geminiCurrentURL?.absoluteString ?? "nil"))")
+
+        let timeout = DispatchWorkItem { [weak self] in
+            print("[Session] timeout reached, flushing with current URLs")
+            self?.flushPendingSession()
+        }
+        urlWatchTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timeout)
+    }
+
+    private func cancelURLWatch() {
+        watchingForURLChange = false
+        pendingSessionName = nil
+        urlWatchTimeout?.cancel()
+        urlWatchTimeout = nil
+    }
+
+    private func checkIfReadyToSave() {
+        guard watchingForURLChange else { return }
+        let v = ProvidersVisibility.shared
+        let chatGPTReady = !v.showChatGPT || chatGPTCurrentURL != baselineChatGPTURL
+        let claudeReady  = !v.showClaude  || claudeCurrentURL  != baselineClaudeURL
+        let geminiReady  = !v.showGemini  || geminiCurrentURL  != baselineGeminiURL
+        print("[Session] URL check — chatGPT:\(chatGPTReady) claude:\(claudeReady) gemini:\(geminiReady)")
+        if chatGPTReady && claudeReady && geminiReady {
+            flushPendingSession()
+        }
+    }
+
+    private func flushPendingSession() {
+        guard let name = pendingSessionName else { return }
+        cancelURLWatch()
+        print("[Session] flush '\(name)' — chatGPT:\(chatGPTCurrentURL?.absoluteString ?? "nil") claude:\(claudeCurrentURL?.absoluteString ?? "nil") gemini:\(geminiCurrentURL?.absoluteString ?? "nil")")
+        onSessionURLsReady?(name, chatGPTCurrentURL, claudeCurrentURL, geminiCurrentURL)
+    }
+
+    deinit {
+        chatGPTView.removeObserver(self, forKeyPath: #keyPath(WKWebView.url))
+        claudeView.removeObserver(self,  forKeyPath: #keyPath(WKWebView.url))
+        geminiView.removeObserver(self,  forKeyPath: #keyPath(WKWebView.url))
+    }
+
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?,
+                               change: [NSKeyValueChangeKey: Any]?,
+                               context: UnsafeMutableRawPointer?) {
+        guard keyPath == #keyPath(WKWebView.url), let webView = object as? WKWebView else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+            return
+        }
+        DispatchQueue.main.async {
+            let url = webView.url
+            if webView === self.chatGPTView {
+                print("[URL] chatGPT -> \(url?.absoluteString ?? "nil")")
+                self.chatGPTCurrentURL = url
+            } else if webView === self.claudeView {
+                print("[URL] claude  -> \(url?.absoluteString ?? "nil")")
+                self.claudeCurrentURL = url
+            } else if webView === self.geminiView {
+                print("[URL] gemini  -> \(url?.absoluteString ?? "nil")")
+                self.geminiCurrentURL = url
+            }
+            self.checkIfReadyToSave()
+        }
+    }
+
     private static func makeWebView() -> WKWebView {
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
@@ -73,6 +186,7 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         config.websiteDataStore = WKWebsiteDataStore.default()
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.customUserAgent = userAgent
+        if #available(macOS 13.3, *) { wv.isInspectable = true }
         return wv
     }
     
@@ -300,6 +414,108 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         """
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
+
+    static func findJS(for query: String) -> String? {
+        guard let data = try? JSONEncoder().encode(query),
+              let qJSON = String(data: data, encoding: .utf8) else { return nil }
+        return """
+        (function(){
+            if(window.__fc)window.__fc();
+            var q=\(qJSON),lq=q.toLowerCase(),ql=q.length;
+            var ranges=[];
+            var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{
+                acceptNode:function(n){
+                    var el=n.parentElement;
+                    while(el){
+                        var t=el.tagName;
+                        if(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT'||
+                           t==='TEXTAREA'||t==='INPUT'||
+                           el.isContentEditable)return NodeFilter.FILTER_REJECT;
+                        el=el.parentElement;
+                    }
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            });
+            var node;
+            while(node=walker.nextNode()){
+                var txt=node.textContent.toLowerCase(),idx=0;
+                while((idx=txt.indexOf(lq,idx))!==-1){
+                    var r=document.createRange();
+                    r.setStart(node,idx);r.setEnd(node,idx+ql);
+                    ranges.push(r);idx++;
+                }
+            }
+            var marks=[];
+            for(var i=ranges.length-1;i>=0;i--){
+                try{
+                    var m=document.createElement('mark');
+                    m.setAttribute('data-find','');
+                    m.style.cssText='background:rgba(255,213,0,0.55);color:inherit;border-radius:2px;padding:0;';
+                    ranges[i].surroundContents(m);
+                    marks.unshift(m);
+                }catch(e){}
+            }
+            var cur=0;
+            function hl(i){
+                marks.forEach(function(m,j){
+                    m.style.background=j===i?'rgba(255,120,0,0.85)':'rgba(255,213,0,0.55)';
+                });
+                if(marks[i])marks[i].scrollIntoView({block:'center',behavior:'smooth'});
+            }
+            if(marks.length)hl(0);
+            window.__fn=function(){if(!marks.length)return;cur=(cur+1)%marks.length;hl(cur);};
+            window.__fp=function(){if(!marks.length)return;cur=(cur-1+marks.length)%marks.length;hl(cur);};
+            window.__fc=function(){
+                marks.forEach(function(m){
+                    var p=m.parentNode;
+                    if(p){
+                        p.replaceChild(document.createTextNode(m.textContent),m);
+                        p.normalize();
+                    }
+                });
+                delete window.__fn;delete window.__fp;delete window.__fc;
+            };
+            return marks.length;
+        })()
+        """
+    }
+
+    func initFind(_ query: String, completion: @escaping (Int) -> Void) {
+        guard !query.isEmpty, let js = Self.findJS(for: query) else { clearFind(); completion(0); return }
+        let v = ProvidersVisibility.shared
+        let webViews: [WKWebView] = [
+            v.showChatGPT ? chatGPTView : nil,
+            v.showClaude  ? claudeView  : nil,
+            v.showGemini  ? geminiView  : nil
+        ].compactMap { $0 }
+        var total = 0
+        let group = DispatchGroup()
+        for wv in webViews {
+            group.enter()
+            wv.evaluateJavaScript(js) { result, error in
+                if let error { print("[Find] JS error: \(error)") }
+                if let n = result as? Int { total += n }
+                else { print("[Find] unexpected result: \(String(describing: result))") }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { completion(total) }
+    }
+
+    func navigateFind(forward: Bool) {
+        let js = forward ? "if(window.__fn)window.__fn();" : "if(window.__fp)window.__fp();"
+        let v = ProvidersVisibility.shared
+        if v.showChatGPT { chatGPTView.evaluateJavaScript(js, completionHandler: nil) }
+        if v.showClaude  { claudeView.evaluateJavaScript(js, completionHandler: nil) }
+        if v.showGemini  { geminiView.evaluateJavaScript(js, completionHandler: nil) }
+    }
+
+    func clearFind() {
+        let js = "if(window.__fc)window.__fc();"
+        for wv in [chatGPTView, claudeView, geminiView] {
+            wv.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
 }
 
 // MARK: - Custom multi-line input
@@ -357,6 +573,9 @@ struct MultilineInput: NSViewRepresentable {
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                    return false // let NSTextView insert a newline
+                }
                 parent.onSubmit()
                 return true
             }
@@ -434,72 +653,146 @@ final class PaddedTextView: NSTextView {
     }
 }
 
+// MARK: - Find-in-page state
+
+@MainActor
+final class FindController: ObservableObject {
+    @Published var isVisible = false
+    @Published var query = ""
+    @Published var matchCount = 0
+    private var eventMonitor: Any?
+
+    func install() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if event.modifierFlags.contains(.command),
+               event.charactersIgnoringModifiers == "f" {
+                Task { @MainActor in self.isVisible = true }
+                return nil
+            }
+            if event.keyCode == 53, self.isVisible {
+                Task { @MainActor in
+                    self.isVisible = false
+                    self.query = ""
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    func uninstall() {
+        if let m = eventMonitor { NSEvent.removeMonitor(m) }
+        eventMonitor = nil
+    }
+}
+
 // MARK: - Main view
 
 struct ProviderWebAuthView: View {
-    @StateObject private var controller = DualChatController()
-    @StateObject private var visibility = ProvidersVisibility.shared
-    @State private var inputText: String = ""
+    @StateObject private var controller   = DualChatController()
+    @StateObject private var visibility   = ProvidersVisibility.shared
+    @StateObject private var usageService = UsageService.shared
+    @StateObject private var sessionStore = ChatSessionStore.shared
+    @StateObject private var find = FindController()
+    @State private var inputText: String  = ""
     @State private var attachments: [ChatAttachment] = []
     @State private var isDropTargeted: Bool = false
-    
+    @State private var isFullScreen: Bool   = false
+
     var body: some View {
-        VStack(spacing: 0) {
-            HSplitView {
-                if visibility.showChatGPT {
-                    VStack(spacing: 0) {
-                        HeaderBar(title: "ChatGPT")
-                        WebViewHost(webView: controller.chatGPTView)
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 0) {
+                HSplitView {
+                    if visibility.showChatGPT {
+                        VStack(spacing: 0) {
+                            HeaderBar(title: "ChatGPT", windows: usageService.chatGptWindows, isFullScreen: isFullScreen)
+                            WebViewHost(webView: controller.chatGPTView)
+                        }
+                    }
+                    if visibility.showClaude {
+                        VStack(spacing: 0) {
+                            HeaderBar(title: "Claude", windows: usageService.claudeWindows, isFullScreen: isFullScreen)
+                            WebViewHost(webView: controller.claudeView)
+                        }
+                    }
+                    if visibility.showGemini {
+                        VStack(spacing: 0) {
+                            HeaderBar(title: "Gemini", windows: usageService.geminiWindows, isFullScreen: isFullScreen)
+                            WebViewHost(webView: controller.geminiView)
+                        }
                     }
                 }
-                if visibility.showClaude {
-                    VStack(spacing: 0) {
-                        HeaderBar(title: "Claude")
-                        WebViewHost(webView: controller.claudeView)
+                .id(splitterKey)
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+                    isFullScreen = true
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+                    isFullScreen = false
+                }
+
+                Divider()
+
+                VStack(spacing: 6) {
+                    SessionBar(controller: controller, sessionStore: sessionStore)
+
+                    if !attachments.isEmpty {
+                        AttachmentChipBar(attachments: $attachments)
+                    }
+
+                    HStack(alignment: .bottom, spacing: 8) {
+                        Button(action: pickFiles) {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 16))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Attach files")
+
+                        MultilineInput(text: $inputText,
+                                       placeholder: "Ask all enabled chats…",
+                                       onSubmit: send,
+                                       onPasteAttachments: { atts in attachments.append(contentsOf: atts) })
+                            .frame(minHeight: 36, maxHeight: 140)
+
+                        Button("Send", action: send)
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .disabled(canSend == false)
                     }
                 }
-                if visibility.showGemini {
-                    VStack(spacing: 0) {
-                        HeaderBar(title: "Gemini")
-                        WebViewHost(webView: controller.geminiView)
-                    }
+                .padding(10)
+                .background(isDropTargeted ? Color.accentColor.opacity(0.15) : Color.clear)
+                .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+                    handleDrop(providers: providers)
                 }
             }
-            .id(splitterKey)
+            .frame(minWidth: 1500, minHeight: 700)
 
-            Divider()
-
-            VStack(spacing: 6) {
-                if !attachments.isEmpty {
-                    AttachmentChipBar(attachments: $attachments)
-                }
-
-                HStack(alignment: .bottom, spacing: 8) {
-                    Button(action: pickFiles) {
-                        Image(systemName: "paperclip")
-                            .font(.system(size: 16))
+            if find.isVisible {
+                FindBar(
+                    query: $find.query,
+                    matchCount: find.matchCount,
+                    onNext: { controller.navigateFind(forward: true) },
+                    onPrevious: { controller.navigateFind(forward: false) },
+                    onDismiss: {
+                        find.isVisible = false
+                        find.query = ""
+                        controller.clearFind()
                     }
-                    .buttonStyle(.borderless)
-                    .help("Attach files")
-
-                    MultilineInput(text: $inputText,
-                                   placeholder: "Ask all enabled chats…",
-                                   onSubmit: send,
-                                   onPasteAttachments: { atts in attachments.append(contentsOf: atts) })
-                        .frame(minHeight: 36, maxHeight: 140)
-
-                    Button("Send", action: send)
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(canSend == false)
-                }
-            }
-            .padding(10)
-            .background(isDropTargeted ? Color.accentColor.opacity(0.15) : Color.clear)
-            .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
-                handleDrop(providers: providers)
+                )
+                .padding(12)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .frame(minWidth: 1500, minHeight: 700)
+        .animation(.easeInOut(duration: 0.15), value: find.isVisible)
+        .onAppear { setupSessionCapture(); find.install() }
+        .onDisappear { find.uninstall() }
+        .onChange(of: find.isVisible) { visible in
+            if !visible { controller.clearFind() }
+        }
+        .onChange(of: find.query) { query in
+            controller.initFind(query) { find.matchCount = $0 }
+        }
     }
 
     private var splitterKey: String {
@@ -514,8 +807,23 @@ struct ProviderWebAuthView: View {
         guard canSend else { return }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         controller.send(text: text, attachments: attachments)
+
+        // Auto-save a new session named after the message, triggered reactively when URLs change
+        if !text.isEmpty && sessionStore.activeSessionID == nil {
+            let name = String(text.prefix(60)).trimmingCharacters(in: .whitespacesAndNewlines)
+            controller.startWatchingForConversationURLs(name: name)
+        }
+
         inputText = ""
         attachments = []
+    }
+
+    private func setupSessionCapture() {
+        controller.onSessionURLsReady = { [weak sessionStore = sessionStore] name, chatGPT, claude, gemini in
+            guard let store = sessionStore else { return }
+            store.saveNewSession(name: name, chatGPTURL: chatGPT, claudeURL: claude, geminiURL: gemini)
+            print("[Session] saved '\(name)'")
+        }
     }
 
     private func pickFiles() {
@@ -545,17 +853,248 @@ struct ProviderWebAuthView: View {
 
 // MARK: - Subviews
 
-private struct HeaderBar: View {
-    let title: String
+private struct SessionManageView: View {
+    @ObservedObject var sessionStore: ChatSessionStore
 
     var body: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Saved Sessions")
+                .font(.headline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            Divider()
+            if sessionStore.sessions.isEmpty {
+                Text("No saved sessions")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+                    .padding(12)
+            } else {
+                ForEach(sessionStore.sessions) { session in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.name).lineLimit(1)
+                            Text([session.chatGPTURL, session.claudeURL, session.geminiURL]
+                                .compactMap { $0 }
+                                .first ?? "no URLs")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Button {
+                            sessionStore.delete(id: session.id)
+                        } label: {
+                            Image(systemName: "trash").foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    Divider()
+                }
+            }
+        }
+        .frame(minWidth: 340)
+    }
+}
+
+private struct SaveSessionPopover: View {
+    @ObservedObject var controller: DualChatController
+    @ObservedObject var sessionStore: ChatSessionStore
+    @Binding var isPresented: Bool
+    @State private var name: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Save Current Session").font(.headline)
+            TextField("Session name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 260)
+                .focused($focused)
+                .onSubmit { save() }
+            HStack {
+                Spacer()
+                Button("Cancel") { isPresented = false }.keyboardShortcut(.escape, modifiers: [])
+                Button("Save") { save() }
+                    .keyboardShortcut(.return, modifiers: [])
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(14)
+        .onAppear { focused = true }
+    }
+
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        sessionStore.saveNewSession(
+            name: trimmed,
+            chatGPTURL: controller.chatGPTCurrentURL,
+            claudeURL:  controller.claudeCurrentURL,
+            geminiURL:  controller.geminiCurrentURL
+        )
+        isPresented = false
+    }
+}
+
+private struct SessionBar: View {
+    @ObservedObject var controller: DualChatController
+    @ObservedObject var sessionStore: ChatSessionStore
+    @State private var showingManage = false
+    @State private var showingSave = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .foregroundColor(.secondary)
+                .font(.system(size: 12))
+
+            Picker("", selection: Binding(
+                get: { sessionStore.activeSessionID },
+                set: { id in
+                    print("[Picker] selected id: \(id?.uuidString ?? "nil"), current: \(sessionStore.activeSessionID?.uuidString ?? "nil")")
+                    guard id != sessionStore.activeSessionID else { return }
+                    sessionStore.setActive(id: id)
+                    if let id, let session = sessionStore.sessions.first(where: { $0.id == id }) {
+                        controller.navigate(to: session)
+                    }
+                }
+            )) {
+                Text("— no session —").tag(nil as UUID?)
+                if !sessionStore.sessions.isEmpty {
+                    Divider()
+                    ForEach(sessionStore.sessions) { session in
+                        Text(session.name).tag(session.id as UUID?)
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 280)
+            .labelsHidden()
+
+            Button {
+                sessionStore.setActive(id: nil)
+                controller.navigateToHomepages()
+            } label: {
+                Label("New Chat", systemImage: "plus.bubble")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.borderless)
+            .help("Start a new chat and clear session selection")
+
+            Button {
+                showingSave.toggle()
+            } label: {
+                Label("Save", systemImage: "square.and.arrow.down")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.borderless)
+            .help("Save current chats as a named session")
+            .popover(isPresented: $showingSave, arrowEdge: .bottom) {
+                SaveSessionPopover(controller: controller, sessionStore: sessionStore,
+                                   isPresented: $showingSave)
+            }
+
+            Button {
+                showingManage.toggle()
+            } label: {
+                Image(systemName: "list.bullet")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Manage saved sessions")
+            .popover(isPresented: $showingManage, arrowEdge: .bottom) {
+                SessionManageView(sessionStore: sessionStore)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+}
+
+private struct HeaderBar: View {
+    let title: String
+    var windows: [UsageWindow] = []
+    var isFullScreen: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
             Text(title).font(.headline)
+            if isFullScreen && !windows.isEmpty {
+                ForEach(windows) { w in
+                    Text(w.resetsAt.map { "\(w.label): \(w.percentRemaining)% · resets \(formatReset($0))" } ?? "\(w.label): \(w.percentRemaining)%")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(w.percentRemaining < 20 ? .orange : .secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                        .cornerRadius(4)
+                }
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func formatReset(_ date: Date) -> String { formatResetDate(date) }
+}
+
+private struct FindBar: View {
+    @Binding var query: String
+    let matchCount: Int
+    let onNext: () -> Void
+    let onPrevious: () -> Void
+    let onDismiss: () -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Find in page…", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+                .focused($focused)
+                .onSubmit { onNext() }
+
+            if !query.isEmpty {
+                Text(matchCount == 0 ? "No results" : "\(matchCount) matches")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 70, alignment: .leading)
+            }
+
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.borderless)
+            .disabled(query.isEmpty || matchCount == 0)
+            .help("Previous match (⌘⇧G)")
+
+            Button(action: onNext) {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .disabled(query.isEmpty || matchCount == 0)
+            .help("Next match (⌘G)")
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Close (Esc)")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+        .onAppear { focused = true }
     }
 }
 
