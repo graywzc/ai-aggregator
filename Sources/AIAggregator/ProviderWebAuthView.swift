@@ -425,9 +425,15 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
             var ranges=[];
             var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{
                 acceptNode:function(n){
-                    var t=n.parentElement&&n.parentElement.tagName;
-                    return(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT')
-                        ?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;
+                    var el=n.parentElement;
+                    while(el){
+                        var t=el.tagName;
+                        if(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT'||
+                           t==='TEXTAREA'||t==='INPUT'||
+                           el.isContentEditable)return NodeFilter.FILTER_REJECT;
+                        el=el.parentElement;
+                    }
+                    return NodeFilter.FILTER_ACCEPT;
                 }
             });
             var node;
