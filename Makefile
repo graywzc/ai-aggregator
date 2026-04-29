@@ -25,6 +25,19 @@ $(APP_BUNDLE): Info.plist $(SWIFT_SOURCES)
 run: all
 	@open $(APP_BUNDLE)
 
+$(BUILD_DIR)/debug/$(APP_NAME).app: Info.plist $(SWIFT_SOURCES)
+	@mkdir -p $(BUILD_DIR)/debug/$(APP_NAME).app/Contents/MacOS
+	@mkdir -p $(BUILD_DIR)/debug/$(APP_NAME).app/Contents/Resources
+	swift build
+	@cp .build/debug/$(APP_EXE) $(BUILD_DIR)/debug/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)
+	@chmod +x $(BUILD_DIR)/debug/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)
+	@cp Info.plist $(BUILD_DIR)/debug/$(APP_NAME).app/Contents/
+	@echo "APPL????" > $(BUILD_DIR)/debug/$(APP_NAME).app/Contents/PkgInfo
+	@codesign --force --deep --sign - $(BUILD_DIR)/debug/$(APP_NAME).app
+
+debug: $(BUILD_DIR)/debug/$(APP_NAME).app
+	@open $(BUILD_DIR)/debug/$(APP_NAME).app
+
 test:
 	swift test
 
