@@ -439,33 +439,41 @@ final class PaddedTextView: NSTextView {
 struct ProviderWebAuthView: View {
     @StateObject private var controller = DualChatController()
     @StateObject private var visibility = ProvidersVisibility.shared
+    @StateObject private var usageService = UsageService.shared
     @State private var inputText: String = ""
     @State private var attachments: [ChatAttachment] = []
     @State private var isDropTargeted: Bool = false
-    
+    @State private var isFullScreen: Bool = false
+
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
                 if visibility.showChatGPT {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "ChatGPT")
+                        HeaderBar(title: "ChatGPT", windows: usageService.chatGptWindows, isFullScreen: isFullScreen)
                         WebViewHost(webView: controller.chatGPTView)
                     }
                 }
                 if visibility.showClaude {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "Claude")
+                        HeaderBar(title: "Claude", windows: usageService.claudeWindows, isFullScreen: isFullScreen)
                         WebViewHost(webView: controller.claudeView)
                     }
                 }
                 if visibility.showGemini {
                     VStack(spacing: 0) {
-                        HeaderBar(title: "Gemini")
+                        HeaderBar(title: "Gemini", windows: usageService.geminiWindows, isFullScreen: isFullScreen)
                         WebViewHost(webView: controller.geminiView)
                     }
                 }
             }
             .id(splitterKey)
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+                isFullScreen = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+                isFullScreen = false
+            }
 
             Divider()
 
@@ -547,15 +555,35 @@ struct ProviderWebAuthView: View {
 
 private struct HeaderBar: View {
     let title: String
+    var windows: [UsageWindow] = []
+    var isFullScreen: Bool = false
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(title).font(.headline)
+            if isFullScreen && !windows.isEmpty {
+                ForEach(windows) { w in
+                    Text(w.resetsAt.map { "\(w.label): \(w.percentRemaining)% · resets \(formatReset($0))" } ?? "\(w.label): \(w.percentRemaining)%")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(w.percentRemaining < 20 ? .orange : .secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                        .cornerRadius(4)
+                }
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func formatReset(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: Date()) ? "HH:mm" : "EEE HH:mm"
+        return formatter.string(from: date)
     }
 }
 
