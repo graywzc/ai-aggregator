@@ -100,7 +100,7 @@ private func makeContext(html: String) -> JSContext {
 
 private func runFind(_ query: String, in ctx: JSContext) -> Int {
     guard let js = DualChatController.findJS(for: query) else { return -1 }
-    return ctx.evaluateScript(js)?.toInt32().map(Int.init) ?? 0
+    return ctx.evaluateScript(js).map { Int($0.toInt32()) } ?? 0
 }
 
 @Suite("FindInPage")
