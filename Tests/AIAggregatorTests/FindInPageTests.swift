@@ -63,7 +63,7 @@ private func makeContext(html: String) -> JSContext {
                         // so re-runs don't double-count. (Real DOM would mutate the node.)
                         s.node.textContent =
                             s.node.textContent.slice(0, s.off) +
-                            '\x00' +
+                            '\\u0000' +
                             s.node.textContent.slice(e.off);
                     }
                 };
