@@ -136,7 +136,7 @@ struct FindInPageTests {
         let ctx = JSContext()!
         var threw = false
         ctx.exceptionHandler = { _, _ in threw = true }
-        ctx.evaluateScript("var document={body:{},createTreeWalker:function(){return{nextNode:function(){return null;}}},createRange:function(){return{};},createElement:function(){return{style:{},setAttribute:function(){},scrollIntoView:function(){}};}};var window=this;")
+        ctx.evaluateScript("var NodeFilter={SHOW_TEXT:4,FILTER_ACCEPT:1,FILTER_REJECT:2};var document={body:{},createTreeWalker:function(){return{nextNode:function(){return null;}}},createRange:function(){return{};},createElement:function(){return{style:{},setAttribute:function(){},scrollIntoView:function(){}};},createTextNode:function(t){return{textContent:t};}};var window=this;")
         ctx.evaluateScript(js!)
         #expect(!threw)
     }
