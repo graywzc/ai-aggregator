@@ -104,6 +104,7 @@ private func runFind(_ query: String, in ctx: JSContext) -> Int {
 }
 
 @Suite("FindInPage")
+@MainActor
 struct FindInPageTests {
 
     @Test func initialControllerState() {
