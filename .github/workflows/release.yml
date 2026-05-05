@@ -3,24 +3,45 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   release:
     runs-on: macos-latest
     permissions:
       contents: write
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Validate Homebrew tap token
+        run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
+            echo "::error::Set HOMEBREW_TAP_TOKEN so releases can open the matching Homebrew tap PR."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
       - name: Build App
         run: make
-        
+
       - name: Package App
+        id: package
         run: |
           cd build
           zip -r AIAggregator.zip AIAggregator.app
-          
+          sha256="$(shasum -a 256 AIAggregator.zip | awk '{print $1}')"
+          echo "${sha256}  AIAggregator.zip"
+          echo "sha256=${sha256}" >> "${GITHUB_OUTPUT}"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -28,3 +49,55 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: graywzc/homebrew-tap
+          path: homebrew-tap
+          token: ${{ env.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update Homebrew cask
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          brew tap graywzc/tap "${PWD}"
+          cask="Casks/ai-aggregator.rb"
+          perl -0pi -e "s|version \"[^\"]+\"|version \"${VERSION}\"|; s|sha256 \"[a-f0-9]+\"|sha256 \"${SHA256}\"|" "${cask}"
+          brew style "${cask}"
+          brew audit --cask ai-aggregator
+
+      - name: Open Homebrew cask PR
+        working-directory: homebrew-tap
+        env:
+          GH_TOKEN: ${{ env.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          branch="ai-aggregator-${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "${branch}"
+          git add Casks/ai-aggregator.rb
+
+          if git diff --cached --quiet; then
+            echo "Cask already points to ai-aggregator ${VERSION}."
+            exit 0
+          fi
+
+          git commit -m "Update ai-aggregator to ${VERSION}"
+          git push --force-with-lease origin "${branch}"
+
+          title="Update ai-aggregator to ${VERSION}"
+          body="Updates ai-aggregator to the v${VERSION} macOS release asset.
+
+Release: https://github.com/graywzc/ai-aggregator/releases/tag/v${VERSION}
+SHA256: ${SHA256}"
+
+          if gh pr view "${branch}" --repo graywzc/homebrew-tap >/dev/null 2>&1; then
+            gh pr edit "${branch}" --repo graywzc/homebrew-tap --title "${title}" --body "${body}"
+          else
+            gh pr create --repo graywzc/homebrew-tap --base main --head "${branch}" --title "${title}" --body "${body}"
+          fi
