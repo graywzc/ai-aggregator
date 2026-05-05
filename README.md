@@ -57,10 +57,19 @@ make test   # Run unit tests
 
 ### Release
 
-Pushing a tag like `v1.2.1` builds `AIAggregator.zip`, publishes a GitHub
-release, then opens a matching Homebrew tap PR for `graywzc/homebrew-tap`.
-Configure a `HOMEBREW_TAP_TOKEN` repository secret with permission to push
-branches and open pull requests in `graywzc/homebrew-tap`.
+Releases are tag-driven. Pushing a `v*` tag builds `AIAggregator.zip`,
+publishes a GitHub release asset, then opens a matching Homebrew tap PR in
+`graywzc/homebrew-tap`.
+
+```bash
+git switch main
+git pull
+git tag v1.2.1
+git push origin v1.2.1
+```
+
+After the workflow finishes, review and merge the generated Homebrew tap PR.
+The release workflow requires the `HOMEBREW_TAP_TOKEN` repository secret.
 
 ## License
 MIT
