@@ -55,5 +55,12 @@ make run    # Build and launch
 make test   # Run unit tests
 ```
 
+### Release
+
+Pushing a tag like `v1.2.1` builds `AIAggregator.zip`, publishes a GitHub
+release, then opens a matching Homebrew tap PR for `graywzc/homebrew-tap`.
+Configure a `HOMEBREW_TAP_TOKEN` repository secret with permission to push
+branches and open pull requests in `graywzc/homebrew-tap`.
+
 ## License
 MIT
