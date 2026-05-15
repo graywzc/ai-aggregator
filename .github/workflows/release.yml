@@ -91,10 +91,12 @@ jobs:
           git push --force-with-lease origin "${branch}"
 
           title="Update ai-aggregator to ${VERSION}"
-          body="Updates ai-aggregator to the v${VERSION} macOS release asset.
+          read -r -d '' body <<EOF || true
+Updates ai-aggregator to the v\${VERSION} macOS release asset.
 
-Release: https://github.com/graywzc/ai-aggregator/releases/tag/v${VERSION}
-SHA256: ${SHA256}"
+Release: https://github.com/graywzc/ai-aggregator/releases/tag/v\${VERSION}
+SHA256: \${SHA256}
+EOF
 
           if gh pr view "${branch}" --repo graywzc/homebrew-tap >/dev/null 2>&1; then
             gh pr edit "${branch}" --repo graywzc/homebrew-tap --title "${title}" --body "${body}"
