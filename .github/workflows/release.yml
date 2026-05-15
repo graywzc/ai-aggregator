@@ -65,7 +65,10 @@ jobs:
         run: |
           brew tap graywzc/tap "${PWD}"
           cask="Casks/ai-aggregator.rb"
-          perl -0pi -e "s|version \"[^\"]+\"|version \"${VERSION}\"|; s|sha256 \"[a-f0-9]+\"|sha256 \"${SHA256}\"|" "${cask}"
+          perl -pi -e "s|version \"[^\"]+\"|version \"${VERSION}\"|g" "${cask}"
+          perl -pi -e "s|sha256 \"[a-f0-9]+\"|sha256 \"${SHA256}\"|g" "${cask}"
+          perl -pi -e "s|desc \"macOS |desc \"|g" "${cask}"
+          if [ -n "$(tail -c 1 "${cask}")" ]; then echo "" >> "${cask}"; fi
           brew style "${cask}"
           brew audit --cask ai-aggregator
 
