@@ -64,6 +64,9 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
           brew tap graywzc/tap "${PWD}"
+          # Homebrew refuses to load casks from non-official taps until they are
+          # trusted, which made `brew audit` fail on the runner.
+          brew trust graywzc/tap
           cask="Casks/ai-aggregator.rb"
           perl -pi -e "s|version \"[^\"]+\"|version \"${VERSION}\"|g" "${cask}"
           perl -pi -e "s|sha256 \"[a-f0-9]+\"|sha256 \"${SHA256}\"|g" "${cask}"
