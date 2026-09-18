@@ -26,16 +26,19 @@ class UsageService: ObservableObject {
     @Published var claudeWindows: [UsageWindow] = []
     @Published var claudeError: String? = nil
 
-    @Published var geminiWindows: [UsageWindow] = []
-    @Published var geminiError: String? = nil
-
     private var timer: Timer?
-    private let googleClientId = "681255809395" + "-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-    private let googleClientSecret = "GOCSPX-4uHgMPm" + "-1o7Sk-geV6Cu5clXFsxl"
-    private let redirectUri = "https://codeassist.google.com/authcode"
 
     init() {
+        Self.removeLegacyGeminiDefaults()
         startPolling()
+    }
+
+    /// Gemini usage stats were removed after Google shut down Gemini Code Assist
+    /// for individual accounts on 2026-06-18. Drop the OAuth refresh token and
+    /// stats toggle that earlier versions stored, so no unused credential lingers.
+    static func removeLegacyGeminiDefaults(_ defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: "gemini_refresh_token")
+        defaults.removeObject(forKey: "show.gemini.stats")
     }
 
     var chatGptCompact: String? {
@@ -46,17 +49,12 @@ class UsageService: ObservableObject {
         guard claudeError == nil, !claudeWindows.isEmpty else { return nil }
         return claudeWindows.map { "\($0.percentRemaining)%" }.joined(separator: "/")
     }
-    var geminiCompact: String? {
-        guard geminiError == nil, !geminiWindows.isEmpty else { return nil }
-        return geminiWindows.map { "\($0.percentRemaining)%" }.joined(separator: "/")
-    }
 
     func startPolling() {
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let allLoggedOut = self.chatGptError == "Logged Out"
                 && self.claudeError == "Logged Out"
-                && self.geminiError == "Logged Out"
             if !allLoggedOut { self.fetchAllUsages() }
         }
         fetchAllUsages()
@@ -68,7 +66,6 @@ class UsageService: ObservableObject {
             let session = self.createSession(with: cookies)
             self.fetchChatGPT(session: session)
             self.fetchClaude(session: session)
-            self.fetchGemini(session: session)
         }
     }
 
@@ -104,16 +101,6 @@ class UsageService: ObservableObject {
         }
     }
 
-    func logoutGemini() {
-        UserDefaults.standard.removeObject(forKey: "gemini_refresh_token")
-        ProvidersVisibility.shared.showGemini = false
-        DispatchQueue.main.async {
-            self.geminiWindows = []
-            self.geminiError = "Logged Out"
-            NotificationCenter.default.post(name: .reloadGemini, object: nil)
-        }
-    }
-
     private func clearCookies(for domainSuffix: String, completion: @escaping () -> Void) {
         let store = WKWebsiteDataStore.default().httpCookieStore
         store.getAllCookies { cookies in
@@ -124,208 +111,6 @@ class UsageService: ObservableObject {
             }
             group.notify(queue: .main) { completion() }
         }
-    }
-
-
-    // MARK: - Gemini OAuth Flow
-
-    var googleAuthURL: URL {
-        let scopes = [
-            "https://www.googleapis.com/auth/cloud-platform",
-            "https://www.googleapis.com/auth/userinfo.email",
-            "https://www.googleapis.com/auth/userinfo.profile"
-        ].joined(separator: " ")
-
-        var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
-        components.queryItems = [
-            URLQueryItem(name: "client_id", value: googleClientId),
-            URLQueryItem(name: "redirect_uri", value: redirectUri),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "scope", value: scopes),
-            URLQueryItem(name: "access_type", value: "offline"),
-            URLQueryItem(name: "prompt", value: "consent")
-        ]
-        return components.url!
-    }
-
-    func handleOAuthCode(_ code: String, verifier: String = "") {
-        guard let url = URL(string: "https://oauth2.googleapis.com/token") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        var body = "client_id=\(googleClientId)&client_secret=\(googleClientSecret)&code=\(code)&redirect_uri=\(redirectUri)&grant_type=authorization_code"
-        if !verifier.isEmpty { body += "&code_verifier=\(verifier)" }
-        request.httpBody = body.data(using: .utf8)
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let data = data, let raw = String(data: data, encoding: .utf8) {
-                print("[Gemini] token exchange: \(raw.prefix(300))")
-            }
-            guard let data = data,
-                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let refreshToken = dict["refresh_token"] as? String else {
-                return
-            }
-            self.saveRefreshToken(refreshToken)
-            self.fetchAllUsages()
-        }.resume()
-    }
-
-    private func saveRefreshToken(_ token: String) {
-        UserDefaults.standard.set(token, forKey: "gemini_refresh_token")
-    }
-
-    private func getRefreshToken() -> String? {
-        UserDefaults.standard.string(forKey: "gemini_refresh_token")
-    }
-
-    // MARK: - Fetchers
-
-    private func fetchGemini(session: URLSession) {
-        guard let refreshToken = getRefreshToken() else {
-            DispatchQueue.main.async {
-                self.geminiWindows = []
-                if self.geminiError != "Logged Out" {
-                    self.geminiError = "Login Required"
-                }
-            }
-            return
-        }
-
-        refreshGoogleToken(refreshToken: refreshToken) { accessToken in
-            guard let token = accessToken else {
-                DispatchQueue.main.async {
-                    self.geminiWindows = []
-                    self.geminiError = "Auth Error"
-                }
-                return
-            }
-            self.fetchGeminiProject(session: session, token: token)
-        }
-    }
-
-    private func refreshGoogleToken(refreshToken: String, completion: @escaping (String?) -> Void) {
-        guard let url = URL(string: "https://oauth2.googleapis.com/token") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        let body = "client_id=\(googleClientId)&client_secret=\(googleClientSecret)&refresh_token=\(refreshToken)&grant_type=refresh_token"
-        request.httpBody = body.data(using: .utf8)
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            guard let data = data,
-                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let accessToken = dict["access_token"] as? String else {
-                completion(nil)
-                return
-            }
-            completion(accessToken)
-        }.resume()
-    }
-
-    private func fetchGeminiProject(session: URLSession, token: String) {
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        let loadBody: [String: Any] = [
-            "metadata": [
-                "ideType": "IDE_UNSPECIFIED",
-                "platform": "PLATFORM_UNSPECIFIED",
-                "pluginType": "GEMINI"
-            ]
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: loadBody)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        session.dataTask(with: request) { data, response, error in
-            if let httpResp = response as? HTTPURLResponse {
-                print("[Gemini] loadCodeAssist HTTP \(httpResp.statusCode)")
-            }
-            if let data = data, let raw = String(data: data, encoding: .utf8) {
-                print("[Gemini] loadCodeAssist body: \(raw.prefix(500))")
-            }
-            let dict = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-            guard let project = dict?["cloudaicompanionProject"] as? String else {
-                // Since 2026-06-18 Google's Code Assist backend rejects the Gemini CLI
-                // OAuth client for individual (free / AI Pro / AI Ultra) accounts with
-                // UNSUPPORTED_CLIENT and points users to Antigravity. Surface that
-                // instead of a misleading "No Project".
-                var message = "No Project"
-                if let tiers = dict?["ineligibleTiers"] as? [[String: Any]],
-                   let tier = tiers.first(where: { $0["reasonCode"] as? String == "UNSUPPORTED_CLIENT" }) {
-                    message = "Unsupported Client"
-                    print("[Gemini] \(tier["reasonMessage"] as? String ?? "client no longer supported")")
-                }
-                DispatchQueue.main.async {
-                    self.geminiWindows = []
-                    self.geminiError = message
-                }
-                return
-            }
-            print("[Gemini] project: \(project)")
-            self.fetchGeminiUsage(session: session, token: token, projectId: project)
-        }.resume()
-    }
-
-    private func fetchGeminiUsage(session: URLSession, token: String, projectId: String) {
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        let body: [String: Any] = ["project": projectId]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        session.dataTask(with: request) { data, response, error in
-            if let httpResp = response as? HTTPURLResponse {
-                print("[Gemini] retrieveUserQuota HTTP \(httpResp.statusCode)")
-            }
-            if let data = data, let raw = String(data: data, encoding: .utf8) {
-                print("[Gemini] retrieveUserQuota body: \(raw.prefix(1000))")
-            }
-            DispatchQueue.main.async {
-                guard let data = data,
-                      let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
-                    self.geminiWindows = []
-                    self.geminiError = "Fetch Error"
-                    return
-                }
-                do {
-                    guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let buckets = dict["buckets"] as? [[String: Any]] else {
-                        self.geminiWindows = []
-                        self.geminiError = "Parse Error"
-                        return
-                    }
-
-                    // Collect all buckets then keep the lowest (most restrictive) per label
-                    var best: [String: UsageWindow] = [:]
-                    for bucket in buckets {
-                        if let frac = bucket["remainingFraction"] as? Double {
-                            let modelId = bucket["modelId"] as? String ?? "unknown"
-                            let label = modelId.contains("flash") ? "Flash" : (modelId.contains("pro") ? "Pro" : modelId)
-                            let pct = Int(frac * 100)
-                            let existing = best[label]
-                            if existing == nil || pct < existing!.percentRemaining {
-                                best[label] = UsageWindow(
-                                    label: label,
-                                    percentRemaining: pct,
-                                    resetsAt: self.extractReset(from: bucket))
-                            }
-                        }
-                    }
-                    let windows = ["Flash", "Pro"].compactMap { best[$0] }
-                        + best.filter { !["Flash", "Pro"].contains($0.key) }.map(\.value)
-
-                    self.geminiWindows = windows
-                    self.geminiError = nil
-                } catch {
-                    self.geminiWindows = []
-                    self.geminiError = "JSON Error"
-                }
-            }
-        }.resume()
     }
 
     // MARK: - ChatGPT Fetcher

@@ -46,34 +46,6 @@ class WindowManager {
         loginWindow?.makeKeyAndOrderFront(nil)
     }
 
-    func showGeminiAuthWindow() {
-        authWindow?.close()
-        authWindow = nil
-
-        let view = GeminiAuthView { [weak self] in
-            DispatchQueue.main.async {
-                self?.authWindow?.close()
-                self?.authWindow = nil
-            }
-        }
-        let hostingController = NSHostingController(rootView: view)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Sign in to Gemini"
-        window.contentViewController = hostingController
-        window.center()
-        window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 480, height: 640)
-        authWindow = window
-
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-    }
-
     func showAuthWindow(for provider: AuthProvider) {
         authWindow?.close()
         authWindow = nil

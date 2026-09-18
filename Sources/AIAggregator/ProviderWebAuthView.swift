@@ -2,12 +2,10 @@ import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
 import AppKit
-import CommonCrypto
 
 extension Notification.Name {
     static let reloadChatGPT = Notification.Name("reloadChatGPT")
     static let reloadClaude  = Notification.Name("reloadClaude")
-    static let reloadGemini  = Notification.Name("reloadGemini")
 }
 
 // MARK: - Attachment model
@@ -67,7 +65,6 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(reloadChatGPT), name: .reloadChatGPT, object: nil)
         nc.addObserver(self, selector: #selector(reloadClaude),  name: .reloadClaude,  object: nil)
-        nc.addObserver(self, selector: #selector(reloadGemini),  name: .reloadGemini,  object: nil)
     }
 
     @objc private func reloadChatGPT() {
@@ -76,10 +73,6 @@ final class DualChatController: NSObject, ObservableObject, WKNavigationDelegate
 
     @objc private func reloadClaude() {
         claudeView.load(URLRequest(url: URL(string: "https://claude.ai/new")!))
-    }
-
-    @objc private func reloadGemini() {
-        geminiView.load(URLRequest(url: URL(string: "https://gemini.google.com/app")!))
     }
 
     func navigate(to session: ChatSession) {
@@ -719,7 +712,7 @@ struct ProviderWebAuthView: View {
                     }
                     if visibility.showGemini {
                         VStack(spacing: 0) {
-                            HeaderBar(title: "Gemini", windows: usageService.geminiWindows, isFullScreen: isFullScreen)
+                            HeaderBar(title: "Gemini", isFullScreen: isFullScreen)
                             WebViewHost(webView: controller.geminiView)
                         }
                     }
@@ -1234,108 +1227,6 @@ struct ProviderAuthView: View {
         pollTimer?.invalidate()
         pollTimer = nil
         onComplete()
-    }
-}
-
-// MARK: - Gemini OAuth webview (intercepts redirect to extract code)
-
-final class GeminiAuthWebController: NSObject, ObservableObject, WKNavigationDelegate {
-    let webView: WKWebView
-    private let verifier: String
-    var onComplete: (() -> Void)?
-
-    override init() {
-        verifier = Self.generateVerifier()
-        let challenge = Self.codeChallenge(for: verifier)
-
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = WKWebsiteDataStore.default()
-        let prefs = WKWebpagePreferences()
-        prefs.allowsContentJavaScript = true
-        config.defaultWebpagePreferences = prefs
-        let wv = WKWebView(frame: .zero, configuration: config)
-        wv.customUserAgent =
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-        webView = wv
-        super.init()
-        webView.navigationDelegate = self
-
-        let scopes = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
-        var comps = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
-        comps.queryItems = [
-            URLQueryItem(name: "client_id",             value: "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"),
-            URLQueryItem(name: "redirect_uri",           value: "https://codeassist.google.com/authcode"),
-            URLQueryItem(name: "response_type",          value: "code"),
-            URLQueryItem(name: "scope",                  value: scopes),
-            URLQueryItem(name: "access_type",            value: "offline"),
-            URLQueryItem(name: "prompt",                 value: "consent"),
-            URLQueryItem(name: "code_challenge",         value: challenge),
-            URLQueryItem(name: "code_challenge_method",  value: "S256"),
-        ]
-        webView.load(URLRequest(url: comps.url!))
-    }
-
-    func webView(_ webView: WKWebView,
-                 decidePolicyFor action: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = action.request.url,
-              url.host == "codeassist.google.com",
-              url.path == "/authcode",
-              let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                  .queryItems?.first(where: { $0.name == "code" })?.value
-        else { decisionHandler(.allow); return }
-
-        decisionHandler(.cancel)
-        UsageService.shared.handleOAuthCode(code, verifier: verifier)
-        onComplete?()
-    }
-
-    private static func generateVerifier() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return Data(bytes).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-
-    private static func codeChallenge(for verifier: String) -> String {
-        guard let data = verifier.data(using: .utf8) else { return verifier }
-        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        data.withUnsafeBytes { _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest) }
-        return Data(digest).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-}
-
-struct GeminiAuthView: View {
-    let onComplete: () -> Void
-    @StateObject private var controller = GeminiAuthWebController()
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Sign in to Gemini").font(.headline)
-                Spacer()
-                Button("Cancel") { onComplete() }.buttonStyle(.borderless)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(NSColor.windowBackgroundColor))
-
-            WebViewHost(webView: controller.webView)
-        }
-        .frame(minWidth: 480, minHeight: 640)
-        .onAppear {
-            controller.onComplete = {
-                DispatchQueue.main.async {
-                    UsageService.shared.fetchAllUsages()
-                    onComplete()
-                }
-            }
-        }
     }
 }
 
