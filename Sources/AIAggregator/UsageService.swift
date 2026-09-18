@@ -245,12 +245,21 @@ class UsageService: ObservableObject {
             if let data = data, let raw = String(data: data, encoding: .utf8) {
                 print("[Gemini] loadCodeAssist body: \(raw.prefix(500))")
             }
-            guard let data = data,
-                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let project = dict["cloudaicompanionProject"] as? String else {
+            let dict = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            guard let project = dict?["cloudaicompanionProject"] as? String else {
+                // Since 2026-06-18 Google's Code Assist backend rejects the Gemini CLI
+                // OAuth client for individual (free / AI Pro / AI Ultra) accounts with
+                // UNSUPPORTED_CLIENT and points users to Antigravity. Surface that
+                // instead of a misleading "No Project".
+                var message = "No Project"
+                if let tiers = dict?["ineligibleTiers"] as? [[String: Any]],
+                   let tier = tiers.first(where: { $0["reasonCode"] as? String == "UNSUPPORTED_CLIENT" }) {
+                    message = "Unsupported Client"
+                    print("[Gemini] \(tier["reasonMessage"] as? String ?? "client no longer supported")")
+                }
                 DispatchQueue.main.async {
                     self.geminiWindows = []
-                    self.geminiError = "No Project"
+                    self.geminiError = message
                 }
                 return
             }

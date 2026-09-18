@@ -106,7 +106,13 @@ private struct ProviderSection: View {
                     Text("Stats").font(.caption2).foregroundColor(.secondary)
                     Toggle("", isOn: $isStatsOn)
                         .toggleStyle(.switch).controlSize(.mini).labelsHidden()
-                } else if error != nil {
+                } else if let error {
+                    if error != "Login Required" && error != "Logged Out" {
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .help(error)
+                    }
                     Button("Login") { onLogin() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
