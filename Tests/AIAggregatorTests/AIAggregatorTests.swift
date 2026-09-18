@@ -6,6 +6,22 @@ import Foundation
 @MainActor
 struct AIAggregatorTests {
 
+    @Test func removesLegacyGeminiDefaults() {
+        let suiteName = "com.graywzc.AIAggregator.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("stale-token", forKey: "gemini_refresh_token")
+        defaults.set(true, forKey: "show.gemini.stats")
+        defaults.set(true, forKey: "show.gemini")
+
+        UsageService.removeLegacyGeminiDefaults(defaults)
+
+        #expect(defaults.object(forKey: "gemini_refresh_token") == nil)
+        #expect(defaults.object(forKey: "show.gemini.stats") == nil)
+        // The chat pane toggle is still in use and must survive.
+        #expect(defaults.bool(forKey: "show.gemini") == true)
+    }
+
     @Test func windowLabel() {
         let svc = UsageService.shared
         #expect(svc.windowLabel(seconds: 86400) == "1d")

@@ -21,7 +21,6 @@ public struct AIAggregatorApp: App {
         var parts: [String] = []
         if visibility.showChatGPTStats, let c = usageService.chatGptCompact { parts.append(c) }
         if visibility.showClaudeStats,  let c = usageService.claudeCompact  { parts.append(c) }
-        if visibility.showGeminiStats,  let c = usageService.geminiCompact  { parts.append(c) }
         return parts.isEmpty ? "AA" : parts.joined(separator: "  ")
     }
 }

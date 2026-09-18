@@ -7,7 +7,7 @@ struct UsagePopoverView: View {
     private var anyChatsEnabled: Bool {
         (usageService.chatGptError == nil && !usageService.chatGptWindows.isEmpty && visibility.showChatGPT)
             || (usageService.claudeError == nil && !usageService.claudeWindows.isEmpty && visibility.showClaude)
-            || (usageService.geminiError == nil && !usageService.geminiWindows.isEmpty && visibility.showGemini)
+            || visibility.showGemini
     }
 
     var body: some View {
@@ -32,15 +32,9 @@ struct UsagePopoverView: View {
                 onLogin: { WindowManager.shared.showAuthWindow(for: .claude) }
             )
 
-            ProviderSection(
-                name: "Gemini",
-                windows: usageService.geminiWindows,
-                error: usageService.geminiError,
-                isChatOn: $visibility.showGemini,
-                isStatsOn: $visibility.showGeminiStats,
-                onLogout: { usageService.logoutGemini() },
-                onLogin: { WindowManager.shared.showGeminiAuthWindow() }
-            )
+            // Gemini has no usage stats: Google shut down the Code Assist quota API
+            // for individual accounts. The chat pane signs in through its own web view.
+            ChatOnlySection(name: "Gemini", isChatOn: $visibility.showGemini)
 
             Divider()
 
@@ -68,6 +62,21 @@ struct UsagePopoverView: View {
         }
         .padding()
         .frame(width: 320)
+    }
+}
+
+private struct ChatOnlySection: View {
+    let name: String
+    @Binding var isChatOn: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(name).font(.subheadline).bold()
+            Spacer()
+            Text("Chat").font(.caption2).foregroundColor(.secondary)
+            Toggle("", isOn: $isChatOn)
+                .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+        }
     }
 }
 
