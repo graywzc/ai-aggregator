@@ -138,11 +138,17 @@ final class SpeedStatsService: ObservableObject {
         if recent.count > Self.maxRecent { recent.removeFirst(recent.count - Self.maxRecent) }
     }
 
-    /// Most recent request long enough to have a meaningful generation rate.
-    var latest: RequestSpeed? { recent.last { $0.genTokensPerSec != nil } }
+    /// Most recent request long enough to have a meaningful generation rate. Prefers one
+    /// with TTFT: a log event without it can land before its span, and without TTFT the
+    /// generation rate counts the wait for the first token and prefill is unknown.
+    var latest: RequestSpeed? {
+        recent.last { $0.genTokensPerSec != nil && $0.ttftMs != nil }
+            ?? recent.last { $0.genTokensPerSec != nil }
+    }
 
     var averageGenTokensPerSec: Double? { Self.mean(recent.compactMap(\.genTokensPerSec)) }
     var averageTtftMs: Double? { Self.mean(recent.compactMap(\.ttftMs)) }
+    var averagePrefillTokensPerSec: Double? { Self.mean(recent.compactMap(\.prefillTokensPerSec)) }
 
     var compact: String? {
         guard let rate = latest?.genTokensPerSec else { return nil }

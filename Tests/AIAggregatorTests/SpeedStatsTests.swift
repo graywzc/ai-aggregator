@@ -113,6 +113,18 @@ struct SpeedStatsTests {
         #expect(svc.latest?.id == "r\(SpeedStatsService.maxRecent + 9)")
     }
 
+    @Test func latestPrefersRequestWithTtft() {
+        let svc = SpeedStatsService()
+        let withTtft = RequestSpeed(id: "a", model: "m", inputTokens: 4000, outputTokens: 100,
+                                    durationMs: 2000, ttftMs: 1000, date: Date(timeIntervalSince1970: 1))
+        let logOnly  = RequestSpeed(id: "b", model: "m", inputTokens: 5000, outputTokens: 100,
+                                    durationMs: 2000, ttftMs: nil, date: Date(timeIntervalSince1970: 2))
+        svc.record([withTtft, logOnly])
+        #expect(svc.latest?.id == "a")
+        #expect(svc.latest?.prefillTokensPerSec == 4000)
+        #expect(svc.averagePrefillTokensPerSec == 4000)
+    }
+
     // MARK: - HTTP framing
 
     private func request(_ body: String) -> Data {
