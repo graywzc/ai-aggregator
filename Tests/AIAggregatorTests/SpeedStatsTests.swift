@@ -119,6 +119,8 @@ struct SpeedStatsTests {
                                     durationMs: 2000, ttftMs: nil, date: Date(timeIntervalSince1970: 2))
         svc.record([withTtft, logOnly])
         #expect(svc.latest?.id == "a")
+        // withTtft streams 100 tokens in 1s; logOnly's 100 over 2s counts the wait.
+        #expect(svc.compact == "75t/s")
     }
 
     // MARK: - HTTP framing

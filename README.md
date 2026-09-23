@@ -20,11 +20,11 @@ A macOS menu bar application that aggregates and displays your current usage lim
 - **Multi-Service Support**: Tracks ChatGPT and Claude utilization windows.
 - **Secure Authentication**: Uses a built-in WebView; leverages system cookies and never stores credentials locally.
 - **Automatic Polling**: Refreshes usage data every minute.
-- **Claude Code Speed**: Shows generation speed (e.g., "62t/s") in the menu bar, with time to first token in the popover. See [Claude Code speed stats](#claude-code-speed-stats).
+- **Claude Code Speed**: Shows average generation speed (e.g., "62t/s") in the menu bar, with time to first token in the popover. See [Claude Code speed stats](#claude-code-speed-stats).
 
 ## Claude Code speed stats
 
-Claude Code can export per-request timings over OpenTelemetry. AIAggregator listens for them on `127.0.0.1:14318` (loopback only) and shows the latest request's output tokens per second in the menu bar. Turn it on by adding this to `~/.claude/settings.json`, then start a new Claude Code session (CLI or desktop app):
+Claude Code can export per-request timings over OpenTelemetry. AIAggregator listens for them on `127.0.0.1:14318` (loopback only) and shows the average output tokens per second over the last 50 requests in the menu bar. Turn it on by adding this to `~/.claude/settings.json`, then start a new Claude Code session (CLI or desktop app):
 
 ```json
 {

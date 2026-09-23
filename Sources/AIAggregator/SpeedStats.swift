@@ -142,8 +142,9 @@ final class SpeedStatsService: ObservableObject {
     var averageGenTokensPerSec: Double? { Self.mean(recent.compactMap(\.genTokensPerSec)) }
     var averageTtftMs: Double? { Self.mean(recent.compactMap(\.ttftMs)) }
 
+    /// Menu bar text: the average rate, which holds steadier than any single request.
     var compact: String? {
-        guard let rate = latest?.genTokensPerSec else { return nil }
+        guard let rate = averageGenTokensPerSec else { return nil }
         return "\(Int(rate.rounded()))t/s"
     }
 
