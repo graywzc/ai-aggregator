@@ -20,13 +20,6 @@ struct RequestSpeed: Identifiable, Equatable {
         guard ms > 0 else { return nil }
         return Double(outputTokens) / (ms / 1000)
     }
-
-    /// Input tokens per second up to the first token. Includes network and queue
-    /// time, and cached input is cheap, so treat this as a rough estimate.
-    var prefillTokensPerSec: Double? {
-        guard let ttftMs, ttftMs > 0, inputTokens > 0 else { return nil }
-        return Double(inputTokens) / (ttftMs / 1000)
-    }
 }
 
 /// Decodes OTLP/HTTP JSON bodies (`OTEL_EXPORTER_OTLP_PROTOCOL=http/json`).
@@ -140,7 +133,7 @@ final class SpeedStatsService: ObservableObject {
 
     /// Most recent request long enough to have a meaningful generation rate. Prefers one
     /// with TTFT: a log event without it can land before its span, and without TTFT the
-    /// generation rate counts the wait for the first token and prefill is unknown.
+    /// generation rate counts the wait for the first token.
     var latest: RequestSpeed? {
         recent.last { $0.genTokensPerSec != nil && $0.ttftMs != nil }
             ?? recent.last { $0.genTokensPerSec != nil }
@@ -148,7 +141,6 @@ final class SpeedStatsService: ObservableObject {
 
     var averageGenTokensPerSec: Double? { Self.mean(recent.compactMap(\.genTokensPerSec)) }
     var averageTtftMs: Double? { Self.mean(recent.compactMap(\.ttftMs)) }
-    var averagePrefillTokensPerSec: Double? { Self.mean(recent.compactMap(\.prefillTokensPerSec)) }
 
     var compact: String? {
         guard let rate = latest?.genTokensPerSec else { return nil }

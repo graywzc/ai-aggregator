@@ -104,22 +104,13 @@ private struct SpeedSection: View {
                 } else if let last = stats.latest {
                     SpeedRow(label: "last:", request: last)
                     if let avg = stats.averageGenTokensPerSec {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 4) {
-                                Text("avg:").frame(width: 45, alignment: .leading).foregroundColor(.secondary)
-                                Text("\(Int(avg.rounded())) t/s")
-                                if let ttft = stats.averageTtftMs {
-                                    Text("ttft \(formatSeconds(ttft))").foregroundColor(.secondary)
-                                }
-                                Spacer()
+                        HStack(spacing: 4) {
+                            Text("avg:").frame(width: 45, alignment: .leading).foregroundColor(.secondary)
+                            Text("\(Int(avg.rounded())) t/s")
+                            if let ttft = stats.averageTtftMs {
+                                Text("ttft \(formatSeconds(ttft))").foregroundColor(.secondary)
                             }
-                            if let prefill = stats.averagePrefillTokensPerSec {
-                                HStack(spacing: 4) {
-                                    Text("").frame(width: 45)
-                                    Text("prefill \(Int(prefill.rounded())) t/s").foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                            }
+                            Spacer()
                         }
                         .font(.system(size: 12, design: .monospaced))
                     }
@@ -151,9 +142,6 @@ private struct SpeedRow: View {
             HStack(spacing: 4) {
                 Text("").frame(width: 45)
                 Text("\(request.inputTokens) in / \(request.outputTokens) out")
-                if let prefill = request.prefillTokensPerSec {
-                    Text("prefill \(Int(prefill.rounded())) t/s")
-                }
                 Spacer()
             }
             .foregroundColor(.secondary)

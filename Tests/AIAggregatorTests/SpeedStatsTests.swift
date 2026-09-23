@@ -42,7 +42,6 @@ struct SpeedStatsTests {
         #expect(r.ttftMs == 2000)
         #expect(r.date == Date(timeIntervalSince1970: 1790017071.589))
         #expect(r.genTokensPerSec == 50)       // 400 tokens over the 8s after first token
-        #expect(r.prefillTokensPerSec == 2000) // 4000 tokens in the 2s before it
     }
 
     @Test func skipsFailedRequestSpan() {
@@ -71,7 +70,6 @@ struct SpeedStatsTests {
         let r = try #require(OTLPParser.parse(payload).first)
         #expect(r.ttftMs == nil)
         #expect(r.genTokensPerSec == 50)       // falls back to whole-request duration
-        #expect(r.prefillTokensPerSec == nil)
     }
 
     @Test func ignoresGarbage() {
@@ -121,8 +119,6 @@ struct SpeedStatsTests {
                                     durationMs: 2000, ttftMs: nil, date: Date(timeIntervalSince1970: 2))
         svc.record([withTtft, logOnly])
         #expect(svc.latest?.id == "a")
-        #expect(svc.latest?.prefillTokensPerSec == 4000)
-        #expect(svc.averagePrefillTokensPerSec == 4000)
     }
 
     // MARK: - HTTP framing
