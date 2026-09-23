@@ -119,8 +119,18 @@ struct SpeedStatsTests {
                                     durationMs: 2000, ttftMs: nil, date: Date(timeIntervalSince1970: 2))
         svc.record([withTtft, logOnly])
         #expect(svc.latest?.id == "a")
-        // withTtft streams 100 tokens in 1s; logOnly's 100 over 2s counts the wait.
-        #expect(svc.compact == "75t/s")
+        #expect(svc.compact == "100t/s") // logOnly counts the wait, so it is left out
+    }
+
+    @Test func averageWeightsByTokens() {
+        let svc = SpeedStatsService()
+        let normal = RequestSpeed(id: "a", model: "m", inputTokens: 10, outputTokens: 1000,
+                                  durationMs: 11_000, ttftMs: 1000, date: Date(timeIntervalSince1970: 1))
+        let burst  = RequestSpeed(id: "b", model: "m", inputTokens: 10, outputTokens: 100,
+                                  durationMs: 1010, ttftMs: 1000, date: Date(timeIntervalSince1970: 2))
+        svc.record([normal, burst])
+        // Per-request rates are 100 and 10,000; the mean would be 5,050.
+        #expect(svc.compact == "110t/s") // 1,100 tokens in 10.01s
     }
 
     // MARK: - HTTP framing

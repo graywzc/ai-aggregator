@@ -24,7 +24,7 @@ A macOS menu bar application that aggregates and displays your current usage lim
 
 ## Claude Code speed stats
 
-Claude Code can export per-request timings over OpenTelemetry. AIAggregator listens for them on `127.0.0.1:14318` (loopback only) and shows the average output tokens per second over the last 50 requests in the menu bar. Turn it on by adding this to `~/.claude/settings.json`, then start a new Claude Code session (CLI or desktop app):
+Claude Code can export per-request timings over OpenTelemetry. AIAggregator listens for them on `127.0.0.1:14318` (loopback only) and shows the average output tokens per second over the last 50 requests in the menu bar (total output tokens over total streaming time). Turn it on by adding this to `~/.claude/settings.json`, then start a new Claude Code session (CLI or desktop app):
 
 ```json
 {

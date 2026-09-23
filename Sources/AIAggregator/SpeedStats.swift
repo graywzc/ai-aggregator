@@ -139,7 +139,17 @@ final class SpeedStatsService: ObservableObject {
             ?? recent.last { $0.genTokensPerSec != nil }
     }
 
-    var averageGenTokensPerSec: Double? { Self.mean(recent.compactMap(\.genTokensPerSec)) }
+    /// Total output tokens over total streaming time, so a short request with a near-zero
+    /// window can't swamp the figure the way a mean of per-request rates lets it. Uses only
+    /// requests with TTFT when there are any, since the rest also count the wait.
+    var averageGenTokensPerSec: Double? {
+        let rated = recent.filter { $0.genTokensPerSec != nil }
+        let timed = rated.filter { $0.ttftMs != nil }
+        let pool = timed.isEmpty ? rated : timed
+        let ms = pool.reduce(0.0) { $0 + $1.durationMs - ($1.ttftMs ?? 0) }
+        guard ms > 0 else { return nil }
+        return Double(pool.reduce(0) { $0 + $1.outputTokens }) / (ms / 1000)
+    }
     var averageTtftMs: Double? { Self.mean(recent.compactMap(\.ttftMs)) }
 
     /// Menu bar text: the average rate, which holds steadier than any single request.
