@@ -2,6 +2,7 @@ import SwiftUI
 
 struct UsagePopoverView: View {
     @StateObject private var usageService = UsageService.shared
+    @StateObject private var speedStats = SpeedStatsService.shared
     @StateObject private var visibility = ProvidersVisibility.shared
 
     private var anyChatsEnabled: Bool {
@@ -35,6 +36,8 @@ struct UsagePopoverView: View {
             // Gemini has no usage stats: Google shut down the Code Assist quota API
             // for individual accounts. The chat pane signs in through its own web view.
             ChatOnlySection(name: "Gemini", isChatOn: $visibility.showGemini)
+
+            SpeedSection(stats: speedStats, isOn: $visibility.showClaudeCodeSpeed)
 
             Divider()
 
@@ -77,6 +80,76 @@ private struct ChatOnlySection: View {
             Toggle("", isOn: $isChatOn)
                 .toggleStyle(.switch).controlSize(.mini).labelsHidden()
         }
+    }
+}
+
+/// Claude Code request speed, fed by its OpenTelemetry export (see README).
+private struct SpeedSection: View {
+    @ObservedObject var stats: SpeedStatsService
+    @Binding var isOn: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Claude Code").font(.subheadline).bold()
+                Spacer()
+                Text("Speed").font(.caption2).foregroundColor(.secondary)
+                Toggle("", isOn: $isOn)
+                    .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+            }
+
+            if isOn {
+                if let error = stats.listenerError {
+                    Text(error).font(.caption2).foregroundColor(.orange)
+                } else if let last = stats.latest {
+                    SpeedRow(label: "last:", request: last)
+                    if let avg = stats.averageGenTokensPerSec {
+                        HStack(spacing: 4) {
+                            Text("avg:").frame(width: 45, alignment: .leading).foregroundColor(.secondary)
+                            Text("\(Int(avg.rounded())) t/s")
+                            if let ttft = stats.averageTtftMs {
+                                Text("ttft \(formatSeconds(ttft))").foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .font(.system(size: 12, design: .monospaced))
+                    }
+                } else {
+                    Text("Waiting for telemetry on 127.0.0.1:\(String(SpeedStatsService.port))")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private func formatSeconds(_ ms: Double) -> String { String(format: "%.1fs", ms / 1000) }
+
+private struct SpeedRow: View {
+    let label: String
+    let request: RequestSpeed
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(label).frame(width: 45, alignment: .leading).foregroundColor(.secondary)
+                if let gen = request.genTokensPerSec { Text("\(Int(gen.rounded())) t/s") }
+                if let ttft = request.ttftMs {
+                    Text("ttft \(formatSeconds(ttft))").foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+            HStack(spacing: 4) {
+                Text("").frame(width: 45)
+                Text("\(request.inputTokens) in / \(request.outputTokens) out")
+                if let prefill = request.prefillTokensPerSec {
+                    Text("prefill \(Int(prefill.rounded())) t/s")
+                }
+                Spacer()
+            }
+            .foregroundColor(.secondary)
+        }
+        .font(.system(size: 12, design: .monospaced))
     }
 }
 
