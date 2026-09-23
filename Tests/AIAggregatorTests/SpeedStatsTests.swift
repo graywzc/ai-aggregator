@@ -42,7 +42,6 @@ struct SpeedStatsTests {
         #expect(r.ttftMs == 2000)
         #expect(r.date == Date(timeIntervalSince1970: 1790017071.589))
         #expect(r.genTokensPerSec == 50)       // 400 tokens over the 8s after first token
-        #expect(r.prefillTokensPerSec == 2000) // 4000 tokens in the 2s before it
     }
 
     @Test func skipsFailedRequestSpan() {
@@ -71,7 +70,6 @@ struct SpeedStatsTests {
         let r = try #require(OTLPParser.parse(payload).first)
         #expect(r.ttftMs == nil)
         #expect(r.genTokensPerSec == 50)       // falls back to whole-request duration
-        #expect(r.prefillTokensPerSec == nil)
     }
 
     @Test func ignoresGarbage() {
@@ -111,6 +109,28 @@ struct SpeedStatsTests {
         #expect(svc.recent.count == SpeedStatsService.maxRecent)
         #expect(svc.recent.last?.id == "short")
         #expect(svc.latest?.id == "r\(SpeedStatsService.maxRecent + 9)")
+    }
+
+    @Test func latestPrefersRequestWithTtft() {
+        let svc = SpeedStatsService()
+        let withTtft = RequestSpeed(id: "a", model: "m", inputTokens: 4000, outputTokens: 100,
+                                    durationMs: 2000, ttftMs: 1000, date: Date(timeIntervalSince1970: 1))
+        let logOnly  = RequestSpeed(id: "b", model: "m", inputTokens: 5000, outputTokens: 100,
+                                    durationMs: 2000, ttftMs: nil, date: Date(timeIntervalSince1970: 2))
+        svc.record([withTtft, logOnly])
+        #expect(svc.latest?.id == "a")
+        #expect(svc.compact == "100t/s") // logOnly counts the wait, so it is left out
+    }
+
+    @Test func averageWeightsByTokens() {
+        let svc = SpeedStatsService()
+        let normal = RequestSpeed(id: "a", model: "m", inputTokens: 10, outputTokens: 1000,
+                                  durationMs: 11_000, ttftMs: 1000, date: Date(timeIntervalSince1970: 1))
+        let burst  = RequestSpeed(id: "b", model: "m", inputTokens: 10, outputTokens: 100,
+                                  durationMs: 1010, ttftMs: 1000, date: Date(timeIntervalSince1970: 2))
+        svc.record([normal, burst])
+        // Per-request rates are 100 and 10,000; the mean would be 5,050.
+        #expect(svc.compact == "110t/s") // 1,100 tokens in 10.01s
     }
 
     // MARK: - HTTP framing

@@ -142,9 +142,6 @@ private struct SpeedRow: View {
             HStack(spacing: 4) {
                 Text("").frame(width: 45)
                 Text("\(request.inputTokens) in / \(request.outputTokens) out")
-                if let prefill = request.prefillTokensPerSec {
-                    Text("prefill \(Int(prefill.rounded())) t/s")
-                }
                 Spacer()
             }
             .foregroundColor(.secondary)

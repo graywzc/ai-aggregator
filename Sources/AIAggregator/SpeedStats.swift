@@ -20,13 +20,6 @@ struct RequestSpeed: Identifiable, Equatable {
         guard ms > 0 else { return nil }
         return Double(outputTokens) / (ms / 1000)
     }
-
-    /// Input tokens per second up to the first token. Includes network and queue
-    /// time, and cached input is cheap, so treat this as a rough estimate.
-    var prefillTokensPerSec: Double? {
-        guard let ttftMs, ttftMs > 0, inputTokens > 0 else { return nil }
-        return Double(inputTokens) / (ttftMs / 1000)
-    }
 }
 
 /// Decodes OTLP/HTTP JSON bodies (`OTEL_EXPORTER_OTLP_PROTOCOL=http/json`).
@@ -138,14 +131,30 @@ final class SpeedStatsService: ObservableObject {
         if recent.count > Self.maxRecent { recent.removeFirst(recent.count - Self.maxRecent) }
     }
 
-    /// Most recent request long enough to have a meaningful generation rate.
-    var latest: RequestSpeed? { recent.last { $0.genTokensPerSec != nil } }
+    /// Most recent request long enough to have a meaningful generation rate. Prefers one
+    /// with TTFT: a log event without it can land before its span, and without TTFT the
+    /// generation rate counts the wait for the first token.
+    var latest: RequestSpeed? {
+        recent.last { $0.genTokensPerSec != nil && $0.ttftMs != nil }
+            ?? recent.last { $0.genTokensPerSec != nil }
+    }
 
-    var averageGenTokensPerSec: Double? { Self.mean(recent.compactMap(\.genTokensPerSec)) }
+    /// Total output tokens over total streaming time, so a short request with a near-zero
+    /// window can't swamp the figure the way a mean of per-request rates lets it. Uses only
+    /// requests with TTFT when there are any, since the rest also count the wait.
+    var averageGenTokensPerSec: Double? {
+        let rated = recent.filter { $0.genTokensPerSec != nil }
+        let timed = rated.filter { $0.ttftMs != nil }
+        let pool = timed.isEmpty ? rated : timed
+        let ms = pool.reduce(0.0) { $0 + $1.durationMs - ($1.ttftMs ?? 0) }
+        guard ms > 0 else { return nil }
+        return Double(pool.reduce(0) { $0 + $1.outputTokens }) / (ms / 1000)
+    }
     var averageTtftMs: Double? { Self.mean(recent.compactMap(\.ttftMs)) }
 
+    /// Menu bar text: the average rate, which holds steadier than any single request.
     var compact: String? {
-        guard let rate = latest?.genTokensPerSec else { return nil }
+        guard let rate = averageGenTokensPerSec else { return nil }
         return "\(Int(rate.rounded()))t/s"
     }
 
