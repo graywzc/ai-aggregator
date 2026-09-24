@@ -42,6 +42,12 @@ Claude Code can export per-request timings over OpenTelemetry. AIAggregator list
 
 The protocol must be `http/json`; protobuf and gRPC exports are ignored. Generation speed is output tokens divided by the time after the first token. Requests with fewer than 20 output tokens are left out of the rates.
 
+### Per-request log
+
+The list icon next to "Claude Code" in the popover opens a table of every API call Claude Code has made, in the style of a local inference server's request log: status, input tokens split into uncached / cache read / cache write, TTFT, output tokens, generation speed, total time, stop reason and Claude Code's estimated cost. Selecting a row shows every attribute Claude Code reported for it. The last 2,000 requests are kept in `~/Library/Application Support/AIAggregator/claude-code-requests.jsonl`, with account identifiers stripped.
+
+Internal calls such as the auto-mode permission classifier appear too, labeled by their source; Claude Code reports no TTFT for them. The Prompt column shows your prompt text only if you also set `"OTEL_LOG_USER_PROMPTS": "1"`; that text is then stored in the same folder.
+
 ## Installation
 
 ### Via Homebrew (Highly Recommended)
