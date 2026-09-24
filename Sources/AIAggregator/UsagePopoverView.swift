@@ -93,6 +93,13 @@ private struct SpeedSection: View {
             HStack(spacing: 8) {
                 Text("Claude Code").font(.subheadline).bold()
                 Spacer()
+                Button {
+                    WindowManager.shared.showRequestsWindow()
+                } label: {
+                    Image(systemName: "list.bullet.rectangle").font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Show every Claude Code request")
                 Text("Speed").font(.caption2).foregroundColor(.secondary)
                 Toggle("", isOn: $isOn)
                     .toggleStyle(.switch).controlSize(.mini).labelsHidden()

@@ -24,6 +24,7 @@ class WindowManager {
 
     private var loginWindow: NSWindow?
     private var authWindow: NSWindow?
+    private var requestsWindow: NSWindow?
 
     func showLoginWindow() {
         if loginWindow == nil {
@@ -44,6 +45,26 @@ class WindowManager {
         }
         NSApplication.shared.activate(ignoringOtherApps: true)
         loginWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func showRequestsWindow() {
+        if requestsWindow == nil {
+            let hostingController = NSHostingController(rootView: RequestsView(log: SpeedStatsService.shared.log))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1250, height: 640),
+                styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Claude Code Requests"
+            window.contentViewController = hostingController
+            window.center()
+            window.setFrameAutosaveName("ClaudeCodeRequestsWindow")
+            window.isReleasedWhenClosed = false
+            requestsWindow = window
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        requestsWindow?.makeKeyAndOrderFront(nil)
     }
 
     func showAuthWindow(for provider: AuthProvider) {

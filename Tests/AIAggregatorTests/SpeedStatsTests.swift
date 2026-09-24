@@ -133,6 +133,103 @@ struct SpeedStatsTests {
         #expect(svc.compact == "110t/s") // 1,100 tokens in 10.01s
     }
 
+    // MARK: - Per-request log
+
+    private let detailedLogs = Data("""
+        {"resourceLogs":[{"scopeLogs":[{"logRecords":[
+          {"timeUnixNano":"1790017061000000000","attributes":[
+             {"key":"event.name","value":{"stringValue":"user_prompt"}},
+             {"key":"prompt.id","value":{"stringValue":"p-1"}},
+             {"key":"prompt","value":{"stringValue":"fix the bug"}}]},
+          {"timeUnixNano":"1790017061500000000","attributes":[
+             {"key":"event.name","value":{"stringValue":"user_prompt"}},
+             {"key":"prompt.id","value":{"stringValue":"p-2"}},
+             {"key":"prompt","value":{"stringValue":"<REDACTED>"}}]},
+          {"timeUnixNano":"1790017062000000000","attributes":[
+             {"key":"event.name","value":{"stringValue":"api_error"}},
+             {"key":"prompt.id","value":{"stringValue":"p-1"}},
+             {"key":"client_request_id","value":{"stringValue":"req-1"}},
+             {"key":"attempt","value":{"intValue":1}},
+             {"key":"error","value":{"stringValue":"overloaded"}},
+             {"key":"duration_ms","value":{"intValue":300}}]},
+          {"timeUnixNano":"1790017070000000000","attributes":[
+             {"key":"event.name","value":{"stringValue":"api_request"}},
+             {"key":"prompt.id","value":{"stringValue":"p-1"}},
+             {"key":"client_request_id","value":{"stringValue":"req-1"}},
+             {"key":"session.id","value":{"stringValue":"s-1"}},
+             {"key":"user.email","value":{"stringValue":"someone@example.com"}},
+             {"key":"query_source","value":{"stringValue":"repl_main_thread"}},
+             {"key":"cost_usd","value":{"doubleValue":0.0123}},
+             {"key":"model","value":{"stringValue":"claude-opus-5-5"}},
+             {"key":"duration_ms","value":{"intValue":5000}},
+             {"key":"input_tokens","value":{"intValue":7}},
+             {"key":"cache_read_tokens","value":{"intValue":900}},
+             {"key":"cache_creation_tokens","value":{"intValue":93}},
+             {"key":"output_tokens","value":{"intValue":250}}]}
+        ]}]}]}
+        """.utf8)
+
+    @Test func parsesDetailsErrorsAndPrompts() throws {
+        let batch = OTLPParser.parseBatch(detailedLogs)
+        #expect(batch.prompts == [PromptRecord(id: "p-1", text: "fix the bug",
+                                               date: Date(timeIntervalSince1970: 1790017061))])
+        #expect(batch.requests.count == 2)
+
+        let failure = batch.requests[0]
+        #expect(!failure.success)
+        #expect(failure.error == "overloaded")
+        #expect(failure.id == "req-1#error1")    // doesn't collide with the retry that succeeded
+        #expect(failure.genTokensPerSec == nil)
+
+        let ok = batch.requests[1]
+        #expect(ok.id == "req-1")
+        #expect(ok.inputTokens == 1000)
+        #expect(ok.uncachedInputTokens == 7)
+        #expect(ok.cacheReadTokens == 900)
+        #expect(ok.cacheCreationTokens == 93)
+        #expect(ok.costUsd == 0.0123)
+        #expect(ok.querySource == "repl_main_thread")
+        #expect(ok.sessionId == "s-1")
+        #expect(ok.attributes["cost_usd"] == "0.0123")
+        #expect(ok.attributes["user.email"] == nil)   // account identifiers aren't stored
+    }
+
+    @Test func failuresStayOutOfSpeedStats() {
+        let svc = SpeedStatsService()
+        svc.record(OTLPParser.parse(detailedLogs))
+        #expect(svc.recent.map(\.id) == ["req-1"])
+    }
+
+    @Test func logMergesSpanAndEventAndPersists() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = RequestLog(directory: dir)
+        let batch = OTLPParser.parseBatch(detailedLogs)
+        log.record(batch.requests, prompts: batch.prompts)
+        log.record(OTLPParser.parse(spanPayload(success: true, extra: tokenAttributes)), prompts: [])
+
+        let merged = try #require(log.requests.first { $0.id == "req-1" })
+        #expect(log.requests.count == 2)
+        #expect(merged.ttftMs == 2000)          // from the span
+        #expect(merged.costUsd == 0.0123)       // from the log event
+        #expect(log.promptText(for: merged) == "fix the bug")
+
+        // Appends land on a background queue; wait for them before reloading.
+        let reloaded = try #require(waitForReload(dir: dir, count: 2))
+        #expect(reloaded.requests.first { $0.id == "req-1" } == merged)
+        #expect(reloaded.promptText(for: merged) == "fix the bug")
+    }
+
+    private func waitForReload(dir: URL, count: Int) -> RequestLog? {
+        for _ in 0..<50 {
+            let log = RequestLog(directory: dir)
+            if log.requests.count == count, log.requests.contains(where: { $0.ttftMs != nil }) { return log }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return nil
+    }
+
     // MARK: - HTTP framing
 
     private func request(_ body: String) -> Data {
