@@ -31,5 +31,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
     public func applicationDidFinishLaunching(_ notification: Notification) {
         SpeedStatsService.shared.start()
+        // Lets a development build open straight to the requests window.
+        if ProcessInfo.processInfo.environment["AIAGGREGATOR_SHOW_REQUESTS"] != nil {
+            WindowManager.shared.showRequestsWindow()
+        }
     }
 }

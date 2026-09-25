@@ -211,23 +211,142 @@ struct SpeedStatsTests {
 
         let merged = try #require(log.requests.first { $0.id == "req-1" })
         #expect(log.requests.count == 2)
+        #expect(log.totalCount == 2)
         #expect(merged.ttftMs == 2000)          // from the span
         #expect(merged.costUsd == 0.0123)       // from the log event
+        #expect(merged.attributes["stop_reason"] == nil)
         #expect(log.promptText(for: merged) == "fix the bug")
 
-        // Appends land on a background queue; wait for them before reloading.
-        let reloaded = try #require(waitForReload(dir: dir, count: 2))
-        #expect(reloaded.requests.first { $0.id == "req-1" } == merged)
+        let reloaded = RequestLog(directory: dir)
+        #expect(reloaded.requests == log.requests)
+        #expect(reloaded.totalCount == 2)
         #expect(reloaded.promptText(for: merged) == "fix the bug")
+        #expect(reloaded.database.openError == nil)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("claude-code.sqlite").path))
     }
 
-    private func waitForReload(dir: URL, count: Int) -> RequestLog? {
-        for _ in 0..<50 {
-            let log = RequestLog(directory: dir)
-            if log.requests.count == count, log.requests.contains(where: { $0.ttftMs != nil }) { return log }
-            Thread.sleep(forTimeInterval: 0.05)
+    @Test func logImportsLegacyJSONLOnce() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // What 1.5.0 wrote: one JSON object per line, a request possibly twice (event, then span).
+        let batch = OTLPParser.parseBatch(detailedLogs)
+        let span = try #require(OTLPParser.parse(spanPayload(success: true, extra: tokenAttributes)).first)
+        let encoder = JSONEncoder()
+        var lines = Data()
+        for r in batch.requests + [span] { lines.append(try encoder.encode(r)); lines.append(UInt8(ascii: "\n")) }
+        try lines.write(to: dir.appendingPathComponent(RequestLog.legacyRequestsFile))
+        var promptLines = Data()
+        for p in batch.prompts { promptLines.append(try encoder.encode(p)); promptLines.append(UInt8(ascii: "\n")) }
+        try promptLines.write(to: dir.appendingPathComponent(RequestLog.legacyPromptsFile))
+
+        let log = RequestLog(directory: dir)
+        #expect(log.requests.count == 2)
+        let merged = try #require(log.requests.first { $0.id == "req-1" })
+        #expect(merged.ttftMs == 2000)
+        #expect(merged.costUsd == 0.0123)
+        #expect(log.promptText(for: merged) == "fix the bug")
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(RequestLog.legacyRequestsFile).path))
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent(RequestLog.legacyRequestsFile + ".imported").path))
+
+        // A second launch doesn't find the files again and keeps the rows.
+        #expect(RequestLog(directory: dir).totalCount == 2)
+    }
+
+    @Test func logKeepsOnlyRecentRowsInMemory() {
+        let log = RequestLog(directory: nil)
+        let many = (0..<(RequestLog.maxEntries + 5)).map { i in
+            RequestSpeed(id: "r\(i)", model: "m", inputTokens: 1, outputTokens: 1,
+                         durationMs: 1, ttftMs: nil, date: Date(timeIntervalSince1970: Double(i)))
         }
-        return nil
+        log.record(many, prompts: [])
+        #expect(log.requests.count == RequestLog.maxEntries)
+        #expect(log.requests.first?.id == "r5")
+        #expect(log.totalCount == RequestLog.maxEntries + 5)
+
+        log.clear()
+        #expect(log.requests.isEmpty)
+        #expect(log.totalCount == 0)
+        #expect(log.database.stats(from: nil, to: nil, by: .total).isEmpty)
+    }
+
+    // MARK: - Stats
+
+    private func sample(_ id: String, model: String, day: Int, out: Int, ms: Double, ttft: Double?,
+                        cost: Double?, success: Bool = true) -> RequestSpeed {
+        var r = RequestSpeed(id: id, model: model, inputTokens: 1000, outputTokens: out,
+                             durationMs: ms, ttftMs: ttft,
+                             date: Calendar.current.date(byAdding: .day, value: -day, to: noon)!)
+        r.costUsd = cost
+        r.success = success
+        return r
+    }
+
+    private var noon: Date {
+        Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
+    }
+
+    @Test func statsAggregatePerModelAndPeriod() throws {
+        let log = RequestLog(directory: nil)
+        log.record([
+            sample("a", model: "claude-opus-5-5", day: 0, out: 1000, ms: 11_000, ttft: 1000, cost: 0.50),
+            sample("b", model: "claude-opus-5-5", day: 0, out: 100, ms: 1_010, ttft: 1000, cost: 0.05),
+            sample("c", model: "claude-haiku-4-5", day: 0, out: 200, ms: 3_000, ttft: 1000, cost: 0.01),
+            sample("d", model: "claude-haiku-4-5", day: 0, out: 5, ms: 500, ttft: 100, cost: 0.001),  // too short to rate
+            sample("e", model: "claude-opus-5-5", day: 0, out: 0, ms: 300, ttft: nil, cost: nil, success: false),
+            sample("g", model: "claude-sonnet-5", day: 0, out: 9, ms: 1_000, ttft: nil, cost: nil),  // side call, no cost
+            sample("f", model: "claude-opus-5-5", day: 3, out: 500, ms: 6_000, ttft: 1000, cost: 2.00),
+        ], prompts: [])
+        let db = log.database
+
+        let today = StatsPeriod.today.range()
+        let byModel = db.stats(from: today.from, to: today.to, by: .model)
+        #expect(byModel.map(\.key) == ["claude-opus-5-5", "claude-haiku-4-5", "claude-sonnet-5"])   // biggest spender first
+        #expect(byModel.last?.stats.reportedCostUsd == nil)
+
+        let opus = try #require(byModel.first?.stats)
+        #expect(opus.requests == 2)
+        #expect(opus.failures == 1)
+        #expect(opus.outputTokens == 1100)
+        #expect(opus.inputTokens == 2000)
+        #expect(abs(opus.costUsd - 0.55) < 1e-9)
+        #expect(opus.genTokensPerSec.map { Int($0.rounded()) } == 110)   // 1,100 tokens in 10.01s, not the mean of rates
+        #expect(opus.averageTtftMs == 1000)
+
+        let haiku = try #require(byModel[1].stats)
+        #expect(haiku.requests == 2)
+        #expect(haiku.genTokens == 200)                    // the 5-token request is left out of the rate
+        #expect(haiku.genTokensPerSec == 100)
+        #expect(abs(haiku.costUsd - 0.011) < 1e-9)
+        #expect(haiku.costCount == 2)
+
+        let all = try #require(db.stats(from: nil, to: nil, by: .total).first?.stats)
+        #expect(all.requests == 6)
+        #expect(abs(all.costUsd - 2.561) < 1e-9)
+
+        let week = StatsPeriod.last7Days.range()
+        let byDay = db.stats(from: week.from, to: week.to, by: .day)
+        #expect(byDay.count == 2)
+        #expect(byDay.first!.key > byDay.last!.key)         // newest day first
+        #expect(byDay.last?.stats.costUsd == 2.00)
+
+        let yesterday = StatsPeriod.yesterday.range()
+        #expect(db.stats(from: yesterday.from, to: yesterday.to, by: .total).isEmpty)
+    }
+
+    @Test func periodRangesFollowTheLocalCalendar() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let now = try #require(cal.date(from: DateComponents(year: 2026, month: 9, day: 25, hour: 15)))
+        func day(_ d: Int, _ m: Int = 9) -> Date { cal.date(from: DateComponents(year: 2026, month: m, day: d))! }
+
+        #expect(StatsPeriod.today.range(now: now, calendar: cal) == (day(25), nil))
+        #expect(StatsPeriod.yesterday.range(now: now, calendar: cal) == (day(24), day(25)))
+        #expect(StatsPeriod.last7Days.range(now: now, calendar: cal) == (day(19), nil))
+        #expect(StatsPeriod.last30Days.range(now: now, calendar: cal) == (day(27, 8), nil))
+        #expect(StatsPeriod.thisMonth.range(now: now, calendar: cal) == (day(1), nil))
+        #expect(StatsPeriod.all.range(now: now, calendar: cal) == (nil, nil))
     }
 
     // MARK: - HTTP framing

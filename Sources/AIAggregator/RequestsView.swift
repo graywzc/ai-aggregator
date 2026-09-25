@@ -1,11 +1,39 @@
 import SwiftUI
 
+/// The Claude Code requests window: the per-request table and the stats tab.
+struct RequestsView: View {
+    @ObservedObject var log: RequestLog
+    @AppStorage("ClaudeCodeRequestsTab") private var tab: Tab = .requests
+
+    enum Tab: String { case requests, stats }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $tab) {
+                Text("Requests").tag(Tab.requests)
+                Text("Stats").tag(Tab.stats)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 200)
+            .padding(.top, 8)
+
+            switch tab {
+            case .requests: RequestTableView(log: log)
+            case .stats: RequestStatsView(log: log)
+            }
+        }
+        .frame(minWidth: 1250, minHeight: 500)
+    }
+}
+
 /// Per-request table of Claude Code API calls, modeled on the aipc1 observer's
 /// Recent Requests panel. Every column is a value Claude Code reports, except
 /// Gen t/s, which is output tokens over the time after the first token.
-struct RequestsView: View {
+struct RequestTableView: View {
     @ObservedObject var log: RequestLog
     @State private var selection: RequestSpeed.ID?
+    @State private var confirmingClear = false
 
     private var rows: [RequestSpeed] { log.requests.reversed() }   // newest first
     private var selected: RequestSpeed? { selection.flatMap { id in log.requests.first { $0.id == id } } }
@@ -21,7 +49,6 @@ struct RequestsView: View {
             RequestDetail(request: selected, prompt: selected.flatMap(log.promptText))
                 .frame(minHeight: 90, idealHeight: 160)
         }
-        .frame(minWidth: 1250, minHeight: 500)
     }
 
     private var summary: some View {
@@ -33,9 +60,19 @@ struct RequestsView: View {
             if failed > 0 { Text("\(failed) failed").foregroundColor(.orange) }
             Text("\(ok.reduce(0) { $0 + $1.inputTokens }.formatted()) in")
             Text("\(ok.reduce(0) { $0 + $1.outputTokens }.formatted()) out")
-            Text("est. cost \(formatCost(cost))")
+            Text("est. cost \(formatMoney(cost))")
+            if log.totalCount > log.requests.count {
+                Text("showing the last \(log.requests.count.formatted()) of \(log.totalCount.formatted()); see Stats for totals")
+                    .foregroundColor(.secondary)
+            }
             Spacer()
-            Button("Clear") { log.clear(); selection = nil }
+            Button("Clear…") { confirmingClear = true }
+                .confirmationDialog("Delete all \(log.totalCount.formatted()) recorded requests?",
+                                    isPresented: $confirmingClear, titleVisibility: .visible) {
+                    Button("Delete", role: .destructive) { log.clear(); selection = nil }
+                } message: {
+                    Text("This removes the whole history from the database, not just the rows shown.")
+                }
         }
         .font(.system(size: 12, design: .monospaced))
         .padding(8)

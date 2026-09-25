@@ -1,120 +1,105 @@
 import Foundation
 
-/// Every Claude Code API request the app has seen, newest last, kept on disk as JSONL
-/// so the requests window survives restarts. Lines are appended as events arrive; a
-/// request reported by both its log event and its span appears twice and is folded
-/// back together on load.
+/// Every Claude Code API request the app has seen, kept in a SQLite database so the
+/// requests window survives restarts and stats can cover any period. The newest
+/// `maxEntries` are also held in memory for the table view; the database is uncapped.
 final class RequestLog: ObservableObject {
     static let maxEntries = 2000
 
+    /// Newest last.
     @Published private(set) var requests: [RequestSpeed] = []
+    /// Prompt text for the requests in memory, by `prompt.id`.
     @Published private(set) var prompts: [String: PromptRecord] = [:]
+    /// Rows in the database, including those older than the in-memory window.
+    @Published private(set) var totalCount = 0
+    /// Bumped on every change, so stats views know when to re-query.
+    @Published private(set) var revision = 0
 
-    private let requestsURL: URL?
-    private let promptsURL: URL?
-    private let queue = DispatchQueue(label: "com.graywzc.AIAggregator.requestlog")
+    let database: RequestDatabase
+    let databaseURL: URL?
 
     /// `directory` nil keeps everything in memory (tests).
     init(directory: URL?) {
-        requestsURL = directory?.appendingPathComponent("claude-code-requests.jsonl")
-        promptsURL = directory?.appendingPathComponent("claude-code-prompts.jsonl")
         if let directory {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
+        databaseURL = directory?.appendingPathComponent("claude-code.sqlite")
+        database = RequestDatabase(url: databaseURL)
+        if let directory { Self.importLegacyFiles(in: directory, into: database) }
         load()
     }
 
+    /// `~/Library/Application Support/AIAggregator`, or `$AIAGGREGATOR_DATA_DIR` when set so a
+    /// development build can run beside the installed app without touching its data.
     static var defaultDirectory: URL? {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+        if let override = ProcessInfo.processInfo.environment["AIAGGREGATOR_DATA_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("AIAggregator", isDirectory: true)
     }
 
     func record(_ incoming: [RequestSpeed], prompts newPrompts: [PromptRecord]) {
-        var changed: [RequestSpeed] = []
-        for r in incoming {
+        let changed = database.merge(incoming)
+        let fresh = newPrompts.filter { prompts[$0.id] != $0 }
+        database.upsertPrompts(fresh)
+        guard !changed.isEmpty || !fresh.isEmpty else { return }
+
+        for r in changed {
             if let i = requests.firstIndex(where: { $0.id == r.id }) {
-                let m = requests[i].merged(with: r)
-                if m != requests[i] { requests[i] = m; changed.append(m) }
+                requests[i] = r
             } else {
                 requests.append(r)
-                changed.append(r)
             }
         }
         requests.sort { $0.date < $1.date }
         if requests.count > Self.maxEntries { requests.removeFirst(requests.count - Self.maxEntries) }
-
-        let fresh = newPrompts.filter { prompts[$0.id] != $0 }
         for p in fresh { prompts[p.id] = p }
-
-        append(changed, to: requestsURL)
-        append(fresh, to: promptsURL)
+        totalCount = database.count()
+        revision += 1
     }
 
     func promptText(for request: RequestSpeed) -> String? {
         request.promptId.flatMap { prompts[$0]?.text }
     }
 
+    /// Deletes every stored request and prompt.
     func clear() {
+        database.deleteAll()
         requests = []
         prompts = [:]
-        queue.async { [requestsURL, promptsURL] in
-            for url in [requestsURL, promptsURL].compactMap({ $0 }) { try? FileManager.default.removeItem(at: url) }
-        }
+        totalCount = 0
+        revision += 1
     }
-
-    // MARK: - Persistence
 
     private func load() {
-        var byId: [String: RequestSpeed] = [:]
-        for r in Self.readLines(RequestSpeed.self, from: requestsURL) {
-            byId[r.id] = byId[r.id].map { $0.merged(with: r) } ?? r
-        }
-        requests = Array(byId.values.sorted { $0.date < $1.date }.suffix(Self.maxEntries))
-
-        let kept = Set(requests.compactMap(\.promptId))
-        for p in Self.readLines(PromptRecord.self, from: promptsURL) where kept.contains(p.id) {
-            prompts[p.id] = p
-        }
-
-        // Rewrite compacted files so duplicates and aged-out entries don't accumulate.
-        rewrite(requests, to: requestsURL)
-        rewrite(Array(prompts.values), to: promptsURL)
+        requests = database.recent(limit: Self.maxEntries)
+        totalCount = database.count()
+        prompts = Dictionary(uniqueKeysWithValues:
+            database.prompts(ids: Set(requests.compactMap(\.promptId))).map { ($0.id, $0) })
     }
 
-    private static func readLines<T: Decodable>(_ type: T.Type, from url: URL?) -> [T] {
-        guard let url, let data = try? Data(contentsOf: url) else { return [] }
+    // MARK: - Import of the JSONL files versions before 1.6 wrote
+
+    static let legacyRequestsFile = "claude-code-requests.jsonl"
+    static let legacyPromptsFile = "claude-code-prompts.jsonl"
+
+    private static func importLegacyFiles(in directory: URL, into database: RequestDatabase) {
+        let requestsURL = directory.appendingPathComponent(legacyRequestsFile)
+        let promptsURL = directory.appendingPathComponent(legacyPromptsFile)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: requestsURL.path) || fm.fileExists(atPath: promptsURL.path) else { return }
+
+        _ = database.merge(readLines(RequestSpeed.self, from: requestsURL))
+        database.upsertPrompts(readLines(PromptRecord.self, from: promptsURL))
+        for url in [requestsURL, promptsURL] where fm.fileExists(atPath: url.path) {
+            try? fm.moveItem(at: url, to: url.appendingPathExtension("imported"))
+        }
+    }
+
+    private static func readLines<T: Decodable>(_ type: T.Type, from url: URL) -> [T] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder()
         return data.split(separator: UInt8(ascii: "\n")).compactMap { try? decoder.decode(T.self, from: Data($0)) }
-    }
-
-    private static func encodeLines<T: Encodable>(_ items: [T]) -> Data {
-        let encoder = JSONEncoder()
-        var out = Data()
-        for item in items {
-            guard let line = try? encoder.encode(item) else { continue }
-            out.append(line)
-            out.append(UInt8(ascii: "\n"))
-        }
-        return out
-    }
-
-    private func append<T: Encodable>(_ items: [T], to url: URL?) {
-        guard let url, !items.isEmpty else { return }
-        let data = Self.encodeLines(items)
-        queue.async {
-            if let handle = try? FileHandle(forWritingTo: url) {
-                defer { try? handle.close() }
-                _ = try? handle.seekToEnd()
-                try? handle.write(contentsOf: data)
-            } else {
-                try? data.write(to: url, options: .atomic)
-            }
-        }
-    }
-
-    private func rewrite<T: Encodable>(_ items: [T], to url: URL?) {
-        guard let url else { return }
-        let data = Self.encodeLines(items)
-        queue.async { try? data.write(to: url, options: .atomic) }
     }
 }
