@@ -44,7 +44,15 @@ The protocol must be `http/json`; protobuf and gRPC exports are ignored. Generat
 
 ### Per-request log
 
-The list icon next to "Claude Code" in the popover opens a table of every API call Claude Code has made, in the style of a local inference server's request log: status, input tokens split into uncached / cache read / cache write, TTFT, output tokens, generation speed, total time, stop reason and Claude Code's estimated cost. Selecting a row shows every attribute Claude Code reported for it. The last 2,000 requests are kept in `~/Library/Application Support/AIAggregator/claude-code-requests.jsonl`, with account identifiers stripped.
+The list icon next to "Claude Code" in the popover opens a table of every API call Claude Code has made, in the style of a local inference server's request log: status, input tokens split into uncached / cache read / cache write, TTFT, output tokens, generation speed, total time, stop reason and Claude Code's estimated cost. Selecting a row shows every attribute Claude Code reported for it. The table shows the last 2,000 requests; every request is kept, with account identifiers stripped, in a SQLite database at `~/Library/Application Support/AIAggregator/claude-code.sqlite` (the `requests` and `prompts` tables). Earlier versions' `claude-code-requests.jsonl` is imported on first launch and renamed `.imported`.
+
+### Stats
+
+The Stats tab of the same window totals the history over a period (today, yesterday, 7 days, 30 days, this month, all time): completed and failed requests, input and output tokens, Claude Code's estimated cost, generation speed and average TTFT, broken down by model and by day. Generation speed is total output tokens over total time after the first token, so short requests can't skew it. The database is plain SQLite, so anything the tab doesn't show is one query away, for example cost per day over the last two weeks:
+
+```bash
+sqlite3 ~/Library/Application\ Support/AIAggregator/claude-code.sqlite "select date(date,'unixepoch','localtime') day, round(sum(cost_usd),2) usd from requests where success group by day order by day desc limit 14"
+```
 
 Internal calls such as the auto-mode permission classifier appear too, labeled by their source; Claude Code reports no TTFT for them. The Prompt column shows your prompt text only if you also set `"OTEL_LOG_USER_PROMPTS": "1"`; that text is then stored in the same folder.
 
