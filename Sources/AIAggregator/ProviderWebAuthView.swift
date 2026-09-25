@@ -1159,6 +1159,7 @@ final class AuthWebController: NSObject, ObservableObject, WKUIDelegate {
         window.title = "Sign in with Google"
         window.contentView = popup
         window.center()
+        window.moveToGUIScreen()
         window.isReleasedWhenClosed = false
         popupWindow = window
 
