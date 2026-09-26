@@ -2,8 +2,8 @@ import Testing
 import Foundation
 @testable import AIAggregator
 
-@Suite("RequestTableView model filter")
-struct RequestTableFilterTests {
+@Suite("ModelFilter")
+struct ModelFilterTests {
     private static func request(_ id: String, model: String) -> RequestSpeed {
         RequestSpeed(id: id, model: model, inputTokens: 10, outputTokens: 20, durationMs: 1000, ttftMs: 100, date: Date())
     }
@@ -12,22 +12,43 @@ struct RequestTableFilterTests {
         ("a", "claude-fable-5-1"), ("b", "claude-haiku-4-5-20251001"), ("c", "claude-fable-5-1"), ("d", ""),
     ].map { request($0.0, model: $0.1) }
 
-    @Test func allModelsKeepsEveryRequest() {
-        #expect(RequestTableView.filter(requests, model: RequestTableView.allModels).map(\.id) == ["a", "b", "c", "d"])
+    private func makeFilter() -> (ModelFilter, UserDefaults) {
+        let name = "com.graywzc.AIAggregator.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        return (ModelFilter(defaults: defaults), defaults)
     }
 
-    @Test func oneModelKeepsOnlyItsRequests() {
-        #expect(RequestTableView.filter(requests, model: "claude-fable-5-1").map(\.id) == ["a", "c"])
-        #expect(RequestTableView.filter(requests, model: "claude-opus-5-5").isEmpty)
+    @Test func nothingHiddenKeepsEveryRequest() {
+        let (filter, _) = makeFilter()
+        #expect(!filter.isActive)
+        #expect(filter.apply(requests).map(\.id) == ["a", "b", "c", "d"])
     }
 
-    @Test func optionsAreDistinctSortedModelsWithoutUnknown() {
-        #expect(RequestTableView.modelOptions(requests, selected: RequestTableView.allModels)
-                == ["claude-fable-5-1", "claude-haiku-4-5-20251001"])
+    @Test func hiddenModelsAreDropped() {
+        let (filter, _) = makeFilter()
+        filter.set("claude-fable-5-1", shown: false)
+        filter.set("", shown: false)
+        #expect(filter.isActive)
+        #expect(filter.apply(requests).map(\.id) == ["b"])
+        filter.set("claude-fable-5-1", shown: true)
+        #expect(filter.apply(requests).map(\.id) == ["a", "b", "c"])
     }
 
-    @Test func optionsKeepAStoredModelNoLongerInTheRows() {
-        #expect(RequestTableView.modelOptions(requests, selected: "claude-opus-5-5")
-                == ["claude-fable-5-1", "claude-haiku-4-5-20251001", "claude-opus-5-5"])
+    @Test func hiddenSetPersistsAndOldPickerKeyIsCleared() {
+        let (filter, defaults) = makeFilter()
+        defaults.set("claude-opus-5-5", forKey: "ClaudeCodeRequestsModel")
+        filter.hidden = ["claude-opus-5-5", "claude-fable-5-1"]
+        #expect(defaults.stringArray(forKey: ModelFilter.key) == ["claude-fable-5-1", "claude-opus-5-5"])
+        let reloaded = ModelFilter(defaults: defaults)
+        #expect(reloaded.hidden == ["claude-opus-5-5", "claude-fable-5-1"])
+        #expect(defaults.object(forKey: "ClaudeCodeRequestsModel") == nil)
+    }
+
+    @Test func modelsAreSortedWithCounts() {
+        let models = ModelFilter.models(in: requests)
+        #expect(models.map(\.model) == ["", "claude-fable-5-1", "claude-haiku-4-5-20251001"])
+        #expect(models.map(\.count) == [1, 2, 1])
+        #expect(ModelFilter.label("") == "(unknown)")
+        #expect(ModelFilter.label("claude-fable-5-1") == "fable-5-1")
     }
 }

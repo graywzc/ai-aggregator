@@ -32,61 +32,57 @@ struct RequestsView: View {
 /// Gen t/s, which is output tokens over the time after the first token.
 struct RequestTableView: View {
     @ObservedObject var log: RequestLog
+    @StateObject private var filter = ModelFilter()
     @State private var selection: RequestSpeed.ID?
     @State private var confirmingClear = false
-    /// Model the table is narrowed to; `allModels` shows every request.
-    @AppStorage("ClaudeCodeRequestsModel") private var modelFilter = RequestTableView.allModels
 
-    static let allModels = ""
+    /// Marks the Model header so the click hook can tell it from other columns.
+    static let modelHeaderMarker = "▾"
 
-    private var rows: [RequestSpeed] { Self.filter(log.requests, model: modelFilter).reversed() }   // newest first
+    private var shown: [RequestSpeed] { filter.apply(log.requests) }
+    private var rows: [RequestSpeed] { shown.reversed() }   // newest first
     private var selected: RequestSpeed? { selection.flatMap { id in log.requests.first { $0.id == id } } }
-
-    /// `requests` narrowed to `model`, or all of them for `allModels`.
-    static func filter(_ requests: [RequestSpeed], model: String) -> [RequestSpeed] {
-        model == allModels ? requests : requests.filter { $0.model == model }
-    }
-
-    /// The models the picker offers: every model among `requests`, sorted, plus `selected`
-    /// if it's no longer among them so the picker never shows a blank choice.
-    static func modelOptions(_ requests: [RequestSpeed], selected: String) -> [String] {
-        var models = Set(requests.map(\.model))
-        models.remove(allModels)
-        if selected != allModels { models.insert(selected) }
-        return models.sorted()
-    }
 
     var body: some View {
         VSplitView {
             VStack(spacing: 0) {
                 summary
                 table
+                    .background(HeaderClickPopover(marker: Self.modelHeaderMarker) {
+                        ModelFilterPopover(filter: filter, log: log)
+                    })
             }
             .frame(minHeight: 260, idealHeight: 420)
 
             RequestDetail(request: selected, prompt: selected.flatMap(log.promptText))
                 .frame(minHeight: 90, idealHeight: 160)
         }
-        .onChange(of: modelFilter) { _ in
+        .onChange(of: filter.hidden) { hidden in
             // Drop a selection the filter hides, so the detail pane matches the table.
-            if let selected, selected.model != modelFilter, modelFilter != Self.allModels { selection = nil }
+            if let selected, hidden.contains(selected.model) { selection = nil }
         }
     }
 
+    private var modelHeader: String {
+        let models = ModelFilter.models(in: log.requests)
+        let visible = models.filter { filter.isShown($0.model) }.count
+        let suffix = filter.isActive && visible < models.count ? " \(visible)/\(models.count)" : ""
+        return "Model \(Self.modelHeaderMarker)\(suffix)"
+    }
+
     private var summary: some View {
-        let shown = Self.filter(log.requests, model: modelFilter)
+        let shown = self.shown
         let ok = shown.filter(\.success)
         let failed = shown.count - ok.count
         let cost = ok.compactMap(\.costUsd).reduce(0, +)
         return HStack(spacing: 16) {
-            modelPicker
             Text("\(ok.count) completed")
             if failed > 0 { Text("\(failed) failed").foregroundColor(.orange) }
             Text("\(ok.reduce(0) { $0 + $1.inputTokens }.formatted()) in")
             Text("\(ok.reduce(0) { $0 + $1.outputTokens }.formatted()) out")
             Text("est. cost \(formatMoney(cost))")
-            if modelFilter != Self.allModels {
-                Text("\(shown.count.formatted()) of the last \(log.requests.count.formatted()); see Stats for totals")
+            if shown.count < log.requests.count {
+                Text("\(shown.count.formatted()) of the last \(log.requests.count.formatted()) shown; click Model to change")
                     .foregroundColor(.secondary)
             } else if log.totalCount > log.requests.count {
                 Text("showing the last \(log.requests.count.formatted()) of \(log.totalCount.formatted()); see Stats for totals")
@@ -105,18 +101,6 @@ struct RequestTableView: View {
         .padding(8)
     }
 
-    private var modelPicker: some View {
-        Picker("Model", selection: $modelFilter) {
-            Text("All models").tag(Self.allModels)
-            ForEach(Self.modelOptions(log.requests, selected: modelFilter), id: \.self) { model in
-                Text(model.replacingOccurrences(of: "claude-", with: "")).tag(model)
-            }
-        }
-        .labelsHidden()
-        .fixedSize()
-        .help("Show only requests to one model")
-    }
-
     private var table: some View {
         Table(rows, selection: $selection) {
             Group {
@@ -133,8 +117,8 @@ struct RequestTableView: View {
                         .help(log.promptText(for: r) ?? "")
                 }
                 .width(min: 100, ideal: 160)
-                TableColumn("Model") { (r: RequestSpeed) in
-                    Text(r.model.replacingOccurrences(of: "claude-", with: ""))
+                TableColumn(modelHeader) { (r: RequestSpeed) in
+                    Text(ModelFilter.label(r.model))
                 }
                 .width(min: 70, ideal: 110)
                 TableColumn("In") { (r: RequestSpeed) in num(r.success ? r.inputTokens : nil) }
