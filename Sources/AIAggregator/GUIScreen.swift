@@ -14,8 +14,12 @@ enum GUIScreen {
 extension NSWindow {
     /// Centers the window on the GUI_SCREEN display, if one is named and attached. Call after
     /// `center()` and any frame restoration, since both put the window back on the main display.
+    /// A development build shares the installed app's preferences, so the placement is not
+    /// autosaved: the installed app keeps opening its windows where the user left them.
     func moveToGUIScreen() {
-        guard let screen = GUIScreen.named, self.screen != screen else { return }
+        guard let screen = GUIScreen.named else { return }
+        setFrameAutosaveName("")
+        guard self.screen != screen else { return }
         let visible = screen.visibleFrame
         var frame = self.frame
         frame.size.width = min(frame.width, visible.width)
