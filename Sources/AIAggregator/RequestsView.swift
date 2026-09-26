@@ -34,9 +34,27 @@ struct RequestTableView: View {
     @ObservedObject var log: RequestLog
     @State private var selection: RequestSpeed.ID?
     @State private var confirmingClear = false
+    /// Model the table is narrowed to; `allModels` shows every request.
+    @AppStorage("ClaudeCodeRequestsModel") private var modelFilter = RequestTableView.allModels
 
-    private var rows: [RequestSpeed] { log.requests.reversed() }   // newest first
+    static let allModels = ""
+
+    private var rows: [RequestSpeed] { Self.filter(log.requests, model: modelFilter).reversed() }   // newest first
     private var selected: RequestSpeed? { selection.flatMap { id in log.requests.first { $0.id == id } } }
+
+    /// `requests` narrowed to `model`, or all of them for `allModels`.
+    static func filter(_ requests: [RequestSpeed], model: String) -> [RequestSpeed] {
+        model == allModels ? requests : requests.filter { $0.model == model }
+    }
+
+    /// The models the picker offers: every model among `requests`, sorted, plus `selected`
+    /// if it's no longer among them so the picker never shows a blank choice.
+    static func modelOptions(_ requests: [RequestSpeed], selected: String) -> [String] {
+        var models = Set(requests.map(\.model))
+        models.remove(allModels)
+        if selected != allModels { models.insert(selected) }
+        return models.sorted()
+    }
 
     var body: some View {
         VSplitView {
@@ -49,19 +67,28 @@ struct RequestTableView: View {
             RequestDetail(request: selected, prompt: selected.flatMap(log.promptText))
                 .frame(minHeight: 90, idealHeight: 160)
         }
+        .onChange(of: modelFilter) { _ in
+            // Drop a selection the filter hides, so the detail pane matches the table.
+            if let selected, selected.model != modelFilter, modelFilter != Self.allModels { selection = nil }
+        }
     }
 
     private var summary: some View {
-        let ok = log.requests.filter(\.success)
-        let failed = log.requests.count - ok.count
+        let shown = Self.filter(log.requests, model: modelFilter)
+        let ok = shown.filter(\.success)
+        let failed = shown.count - ok.count
         let cost = ok.compactMap(\.costUsd).reduce(0, +)
         return HStack(spacing: 16) {
+            modelPicker
             Text("\(ok.count) completed")
             if failed > 0 { Text("\(failed) failed").foregroundColor(.orange) }
             Text("\(ok.reduce(0) { $0 + $1.inputTokens }.formatted()) in")
             Text("\(ok.reduce(0) { $0 + $1.outputTokens }.formatted()) out")
             Text("est. cost \(formatMoney(cost))")
-            if log.totalCount > log.requests.count {
+            if modelFilter != Self.allModels {
+                Text("\(shown.count.formatted()) of the last \(log.requests.count.formatted()); see Stats for totals")
+                    .foregroundColor(.secondary)
+            } else if log.totalCount > log.requests.count {
                 Text("showing the last \(log.requests.count.formatted()) of \(log.totalCount.formatted()); see Stats for totals")
                     .foregroundColor(.secondary)
             }
@@ -76,6 +103,18 @@ struct RequestTableView: View {
         }
         .font(.system(size: 12, design: .monospaced))
         .padding(8)
+    }
+
+    private var modelPicker: some View {
+        Picker("Model", selection: $modelFilter) {
+            Text("All models").tag(Self.allModels)
+            ForEach(Self.modelOptions(log.requests, selected: modelFilter), id: \.self) { model in
+                Text(model.replacingOccurrences(of: "claude-", with: "")).tag(model)
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .help("Show only requests to one model")
     }
 
     private var table: some View {

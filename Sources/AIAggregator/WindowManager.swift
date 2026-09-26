@@ -39,6 +39,7 @@ class WindowManager {
             window.contentViewController = hostingController
             window.center()
             window.setFrameAutosaveName("ProviderLoginWindow")
+            window.moveToGUIScreen()
             window.isReleasedWhenClosed = false
             window.collectionBehavior.insert(.fullScreenPrimary)
             loginWindow = window
@@ -60,6 +61,7 @@ class WindowManager {
             window.contentViewController = hostingController
             window.center()
             window.setFrameAutosaveName("ClaudeCodeRequestsWindow")
+            window.moveToGUIScreen()
             window.isReleasedWhenClosed = false
             requestsWindow = window
         }
@@ -87,6 +89,7 @@ class WindowManager {
         window.title = "Sign in to \(provider.name)"
         window.contentViewController = hostingController
         window.center()
+        window.moveToGUIScreen()
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 480, height: 640)
         authWindow = window
