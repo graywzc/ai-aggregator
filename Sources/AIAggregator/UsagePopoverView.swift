@@ -3,6 +3,7 @@ import SwiftUI
 struct UsagePopoverView: View {
     @StateObject private var usageService = UsageService.shared
     @StateObject private var speedStats = SpeedStatsService.shared
+    @StateObject private var codexStats = SpeedStatsService.codex
     @StateObject private var visibility = ProvidersVisibility.shared
 
     private var anyChatsEnabled: Bool {
@@ -38,6 +39,7 @@ struct UsagePopoverView: View {
             ChatOnlySection(name: "Gemini", isChatOn: $visibility.showGemini)
 
             SpeedSection(stats: speedStats, isOn: $visibility.showClaudeCodeSpeed)
+            SpeedSection(stats: codexStats, isOn: $visibility.showCodexSpeed)
 
             Divider()
 
@@ -83,7 +85,7 @@ private struct ChatOnlySection: View {
     }
 }
 
-/// Claude Code request speed, fed by its OpenTelemetry export (see README).
+/// A coding agent's request speed, fed by its OpenTelemetry export (see README).
 private struct SpeedSection: View {
     @ObservedObject var stats: SpeedStatsService
     @Binding var isOn: Bool
@@ -91,15 +93,15 @@ private struct SpeedSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text("Claude Code").font(.subheadline).bold()
+                Text(stats.source.name).font(.subheadline).bold()
                 Spacer()
                 Button {
-                    WindowManager.shared.showRequestsWindow()
+                    WindowManager.shared.showRequestsWindow(for: stats.source)
                 } label: {
                     Image(systemName: "list.bullet.rectangle").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("Show every Claude Code request")
+                .help("Show every \(stats.source.name) request")
                 Text("Speed").font(.caption2).foregroundColor(.secondary)
                 Toggle("", isOn: $isOn)
                     .toggleStyle(.switch).controlSize(.mini).labelsHidden()

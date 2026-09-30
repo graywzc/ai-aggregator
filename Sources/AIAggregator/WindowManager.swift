@@ -24,7 +24,7 @@ class WindowManager {
 
     private var loginWindow: NSWindow?
     private var authWindow: NSWindow?
-    private var requestsWindow: NSWindow?
+    private var requestsWindows: [RequestSource: NSWindow] = [:]
 
     func showLoginWindow() {
         if loginWindow == nil {
@@ -48,25 +48,26 @@ class WindowManager {
         loginWindow?.makeKeyAndOrderFront(nil)
     }
 
-    func showRequestsWindow() {
-        if requestsWindow == nil {
-            let hostingController = NSHostingController(rootView: RequestsView(log: SpeedStatsService.shared.log))
+    func showRequestsWindow(for source: RequestSource) {
+        if requestsWindows[source] == nil {
+            let service = source == .codex ? SpeedStatsService.codex : SpeedStatsService.shared
+            let hostingController = NSHostingController(rootView: RequestsView(log: service.log))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1250, height: 640),
                 styleMask: [.titled, .closable, .resizable, .miniaturizable],
                 backing: .buffered,
                 defer: false
             )
-            window.title = "Claude Code Requests"
+            window.title = "\(source.name) Requests"
             window.contentViewController = hostingController
             window.center()
-            window.setFrameAutosaveName("ClaudeCodeRequestsWindow")
+            window.setFrameAutosaveName(source.defaultsKey("RequestsWindow"))
             window.moveToGUIScreen()
             window.isReleasedWhenClosed = false
-            requestsWindow = window
+            requestsWindows[source] = window
         }
         NSApplication.shared.activate(ignoringOtherApps: true)
-        requestsWindow?.makeKeyAndOrderFront(nil)
+        requestsWindows[source]?.makeKeyAndOrderFront(nil)
     }
 
     func showAuthWindow(for provider: AuthProvider) {

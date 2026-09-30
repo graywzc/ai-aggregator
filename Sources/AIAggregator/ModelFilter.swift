@@ -4,16 +4,19 @@ import SwiftUI
 /// Which models the requests table hides. Stored as the hidden set, so a model that
 /// starts appearing after the choice was made is shown until unchecked.
 final class ModelFilter: ObservableObject {
-    static let key = "ClaudeCodeRequestsHiddenModels"
+    static func key(for source: RequestSource) -> String { source.defaultsKey("RequestsHiddenModels") }
+    static let key = key(for: .claudeCode)
 
     @Published var hidden: Set<String> {
-        didSet { defaults.set(hidden.sorted(), forKey: Self.key) }
+        didSet { defaults.set(hidden.sorted(), forKey: key) }
     }
     private let defaults: UserDefaults
+    private let key: String
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, source: RequestSource = .claudeCode) {
         self.defaults = defaults
-        hidden = Set(defaults.stringArray(forKey: Self.key) ?? [])
+        key = Self.key(for: source)
+        hidden = Set(defaults.stringArray(forKey: key) ?? [])
         defaults.removeObject(forKey: "ClaudeCodeRequestsModel")   // 1.6.1's single-model picker
     }
 

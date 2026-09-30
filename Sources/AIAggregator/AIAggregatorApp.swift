@@ -5,6 +5,7 @@ public struct AIAggregatorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var usageService = UsageService.shared
     @ObservedObject private var speedStats = SpeedStatsService.shared
+    @ObservedObject private var codexStats = SpeedStatsService.codex
     @ObservedObject private var visibility = ProvidersVisibility.shared
 
     public init() {}
@@ -23,6 +24,7 @@ public struct AIAggregatorApp: App {
         if visibility.showChatGPTStats, let c = usageService.chatGptCompact { parts.append(c) }
         if visibility.showClaudeStats,  let c = usageService.claudeCompact  { parts.append(c) }
         if visibility.showClaudeCodeSpeed, let c = speedStats.compact       { parts.append(c) }
+        if visibility.showCodexSpeed, let c = codexStats.compact           { parts.append("cx \(c)") }
         return parts.isEmpty ? "AA" : parts.joined(separator: "  ")
     }
 }
@@ -30,10 +32,10 @@ public struct AIAggregatorApp: App {
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        SpeedStatsService.shared.start()
-        // Lets a development build open straight to the requests window.
-        if ProcessInfo.processInfo.environment["AIAGGREGATOR_SHOW_REQUESTS"] != nil {
-            WindowManager.shared.showRequestsWindow()
+        SpeedStatsService.start()
+        // Lets a development build open straight to a requests window ("codex" for Codex's).
+        if let which = ProcessInfo.processInfo.environment["AIAGGREGATOR_SHOW_REQUESTS"] {
+            WindowManager.shared.showRequestsWindow(for: which == "codex" ? .codex : .claudeCode)
         }
     }
 }

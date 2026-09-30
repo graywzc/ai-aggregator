@@ -1,6 +1,6 @@
 import Foundation
 
-/// Every Claude Code API request the app has seen, kept in a SQLite database so the
+/// Every API request the app has seen from one coding agent, kept in a SQLite database so the
 /// requests window survives restarts and stats can cover any period. The newest
 /// `maxEntries` are also held in memory for the table view; the database is uncapped.
 final class RequestLog: ObservableObject {
@@ -15,17 +15,19 @@ final class RequestLog: ObservableObject {
     /// Bumped on every change, so stats views know when to re-query.
     @Published private(set) var revision = 0
 
+    let source: RequestSource
     let database: RequestDatabase
     let databaseURL: URL?
 
     /// `directory` nil keeps everything in memory (tests).
-    init(directory: URL?) {
+    init(directory: URL?, source: RequestSource = .claudeCode) {
+        self.source = source
         if let directory {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        databaseURL = directory?.appendingPathComponent("claude-code.sqlite")
+        databaseURL = directory?.appendingPathComponent(source.databaseFileName)
         database = RequestDatabase(url: databaseURL)
-        if let directory { Self.importLegacyFiles(in: directory, into: database) }
+        if let directory, source == .claudeCode { Self.importLegacyFiles(in: directory, into: database) }
         load()
     }
 
