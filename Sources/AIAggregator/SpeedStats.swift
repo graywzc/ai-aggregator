@@ -169,7 +169,7 @@ enum OTLPParser {
     }
 
     /// OTLP attributes are `[{key, value: {stringValue|intValue|doubleValue|boolValue: …}}]`.
-    private static func attributes(_ raw: Any?) -> [String: Any] {
+    static func attributes(_ raw: Any?) -> [String: Any] {
         var out: [String: Any] = [:]
         for kv in raw as? [[String: Any]] ?? [] {
             guard let key = kv["key"] as? String, let value = kv["value"] as? [String: Any] else { continue }
@@ -180,51 +180,69 @@ enum OTLPParser {
     }
 
     /// intValue may arrive as a JSON number or, per the OTLP spec, a decimal string.
-    private static func number(_ value: Any?) -> Double? {
+    static func number(_ value: Any?) -> Double? {
         if let n = value as? NSNumber { return n.doubleValue }
         if let s = value as? String { return Double(s) }
         return nil
     }
 
-    private static func nanos(_ value: Any?) -> Date? {
+    static func nanos(_ value: Any?) -> Date? {
         guard let n = number(value), n > 0 else { return nil }
         return Date(timeIntervalSince1970: n / 1_000_000_000)
     }
 }
 
 final class SpeedStatsService: ObservableObject {
-    static let shared = SpeedStatsService(log: RequestLog(directory: RequestLog.defaultDirectory))
+    static let shared = SpeedStatsService(source: .claudeCode, log: RequestLog(directory: RequestLog.defaultDirectory))
+    static let codex = SpeedStatsService(
+        source: .codex, log: RequestLog(directory: RequestLog.defaultDirectory, source: .codex))
 
-    /// Port Claude Code should export to: `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318`.
-    static let port: UInt16 = 14318
+    /// Port both agents export to: `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318` for
+    /// Claude Code, `endpoint = "http://127.0.0.1:14318/v1/logs"` in Codex's [otel] config.
+    /// `$AIAGGREGATOR_OTLP_PORT` overrides it, so a development build can listen beside the installed app.
+    static let port: UInt16 = ProcessInfo.processInfo.environment["AIAGGREGATOR_OTLP_PORT"].flatMap { UInt16($0) } ?? 14318
     static let maxRecent = 50
 
     @Published private(set) var recent: [RequestSpeed] = []   // newest last
     @Published private(set) var listenerError: String? = nil
 
+    let source: RequestSource
     /// Full per-request history for the requests window; `recent` feeds the popover.
     let log: RequestLog
-    private var receiver: OTLPReceiver?
 
-    init(log: RequestLog = RequestLog(directory: nil)) {
-        self.log = log
-        recent = Array(log.requests.filter(\.success).suffix(Self.maxRecent))
+    /// `log` nil keeps everything in memory (tests).
+    init(source: RequestSource = .claudeCode, log: RequestLog? = nil) {
+        self.source = source
+        self.log = log ?? RequestLog(directory: nil, source: source)
+        recent = Array(self.log.requests.filter(\.success).suffix(Self.maxRecent))
     }
 
-    func start() {
+    private static var receiver: OTLPReceiver?
+
+    /// Starts the one loopback listener; each body goes to whichever agent sent it.
+    static func start() {
         guard receiver == nil else { return }
-        let receiver = OTLPReceiver(port: Self.port) { [weak self] body in
-            let batch = OTLPParser.parseBatch(body)
-            guard !batch.requests.isEmpty || !batch.prompts.isEmpty else { return }
+        let claude = shared, codex = self.codex
+        let codexParser = CodexOTLPParser()   // touched only on the receiver's queue
+        let receiver = OTLPReceiver(port: port) { body in
+            claude.ingest(OTLPParser.parseBatch(body))
+            codex.ingest(codexParser.parseBatch(body))
+        } onError: { message in
             DispatchQueue.main.async {
-                self?.log.record(batch.requests, prompts: batch.prompts)
-                self?.record(batch.requests)
+                claude.listenerError = message
+                codex.listenerError = message
             }
-        } onError: { [weak self] message in
-            DispatchQueue.main.async { self?.listenerError = message }
         }
         self.receiver = receiver
         receiver.start()
+    }
+
+    private func ingest(_ batch: (requests: [RequestSpeed], prompts: [PromptRecord])) {
+        guard !batch.requests.isEmpty || !batch.prompts.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.log.record(batch.requests, prompts: batch.prompts)
+            self?.record(batch.requests)
+        }
     }
 
     /// Logs and spans describe the same request; keep one entry, preferring the one with TTFT.

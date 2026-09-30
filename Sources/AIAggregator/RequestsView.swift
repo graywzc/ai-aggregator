@@ -1,11 +1,16 @@
 import SwiftUI
 
-/// The Claude Code requests window: the per-request table and the stats tab.
+/// A coding agent's requests window: the per-request table and the stats tab.
 struct RequestsView: View {
     @ObservedObject var log: RequestLog
-    @AppStorage("ClaudeCodeRequestsTab") private var tab: Tab = .requests
+    @AppStorage private var tab: Tab
 
     enum Tab: String { case requests, stats }
+
+    init(log: RequestLog) {
+        self.log = log
+        _tab = AppStorage(wrappedValue: .requests, log.source.defaultsKey("RequestsTab"))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,14 +32,20 @@ struct RequestsView: View {
     }
 }
 
-/// Per-request table of Claude Code API calls, modeled on the aipc1 observer's
-/// Recent Requests panel. Every column is a value Claude Code reports, except
-/// Gen t/s, which is output tokens over the time after the first token.
+/// Per-request table of a coding agent's API calls, modeled on the aipc1 observer's
+/// Recent Requests panel. Every column is a value the agent reports, except Gen t/s,
+/// which is output tokens over the time after the first token, and Codex's Total,
+/// which is the time between its request and response-completed events.
 struct RequestTableView: View {
     @ObservedObject var log: RequestLog
-    @StateObject private var filter = ModelFilter()
+    @StateObject private var filter: ModelFilter
     @State private var selection: RequestSpeed.ID?
     @State private var confirmingClear = false
+
+    init(log: RequestLog) {
+        self.log = log
+        _filter = StateObject(wrappedValue: ModelFilter(source: log.source))
+    }
 
     /// Marks the Model header so the click hook can tell it from other columns.
     static let modelHeaderMarker = "▾"
@@ -54,7 +65,7 @@ struct RequestTableView: View {
             }
             .frame(minHeight: 260, idealHeight: 420)
 
-            RequestDetail(request: selected, prompt: selected.flatMap(log.promptText))
+            RequestDetail(request: selected, prompt: selected.flatMap(log.promptText), source: log.source)
                 .frame(minHeight: 90, idealHeight: 160)
         }
         .onChange(of: filter.hidden) { hidden in
@@ -62,6 +73,8 @@ struct RequestTableView: View {
             if let selected, hidden.contains(selected.model) { selection = nil }
         }
     }
+
+    private var isCodex: Bool { log.source == .codex }
 
     private var modelHeader: String {
         let models = ModelFilter.models(in: log.requests)
@@ -80,7 +93,7 @@ struct RequestTableView: View {
             if failed > 0 { Text("\(failed) failed").foregroundColor(.orange) }
             Text("\(ok.reduce(0) { $0 + $1.inputTokens }.formatted()) in")
             Text("\(ok.reduce(0) { $0 + $1.outputTokens }.formatted()) out")
-            Text("est. cost \(formatMoney(cost))")
+            if log.source.reportsCost { Text("est. cost \(formatMoney(cost))") }
             if shown.count < log.requests.count {
                 Text("\(shown.count.formatted()) of the last \(log.requests.count.formatted()) shown; click Model to change")
                     .foregroundColor(.secondary)
@@ -139,9 +152,16 @@ struct RequestTableView: View {
                 .width(55)
                 TableColumn("Total") { (r: RequestSpeed) in Text(formatSecs(r.durationMs)) }
                     .width(55)
-                TableColumn("Stop") { (r: RequestSpeed) in Text(r.attributes["stop_reason"] ?? "–") }
-                    .width(min: 55, ideal: 70)
-                TableColumn("Cost") { (r: RequestSpeed) in Text(r.costUsd.map(formatCost) ?? "–") }.width(65)
+                // Codex reports no stop reason or cost; those slots show its reasoning
+                // tokens (counted within Out) and effort instead.
+                TableColumn(isCodex ? "Reason" : "Stop") { (r: RequestSpeed) in
+                    Text((isCodex ? r.attributes["reasoning_token_count"] : r.attributes["stop_reason"]) ?? "–")
+                }
+                .width(min: 55, ideal: 70)
+                TableColumn(isCodex ? "Effort" : "Cost") { (r: RequestSpeed) in
+                    Text(isCodex ? r.attributes["model_reasoning_effort"] ?? "–" : r.costUsd.map(formatCost) ?? "–")
+                }
+                .width(65)
             }
         }
         .font(.system(size: 11, design: .monospaced))
@@ -161,6 +181,7 @@ struct RequestTableView: View {
 private struct RequestDetail: View {
     let request: RequestSpeed?
     let prompt: String?
+    let source: RequestSource
 
     var body: some View {
         if let request {
@@ -187,7 +208,7 @@ private struct RequestDetail: View {
                 .padding(10)
             }
         } else {
-            Text("Select a request to see every attribute Claude Code reported for it.")
+            Text("Select a request to see every attribute \(source.name) reported for it.")
                 .font(.caption).foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

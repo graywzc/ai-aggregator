@@ -56,6 +56,18 @@ sqlite3 ~/Library/Application\ Support/AIAggregator/claude-code.sqlite "select d
 
 Internal calls such as the auto-mode permission classifier appear too, labeled by their source; Claude Code reports no TTFT for them. The Prompt column shows your prompt text only if you also set `"OTEL_LOG_USER_PROMPTS": "1"`; that text is then stored in the same folder.
 
+## Codex requests
+
+Codex, the coding agent in the ChatGPT app and the `codex` CLI, can send the same kind of per-request telemetry. The list icon next to "Codex" in the popover opens a Codex Requests window with the same table and Stats tab, kept in its own database at `~/Library/Application Support/AIAggregator/codex.sqlite`. Turn it on by adding this to `~/.codex/config.toml`, then start a new Codex session:
+
+```toml
+[otel]
+log_user_prompt = true   # optional: shows your prompt text in the Prompt column
+exporter = { otlp-http = { endpoint = "http://127.0.0.1:14318/v1/logs", protocol = "json" } }
+```
+
+Codex reports each response's token counts (input includes cached tokens, output includes reasoning tokens) and TTFT. It reports no request duration, so Total is the time from Codex's request event to its response-completed event. Codex reports no cost or stop reason either. Those two columns show reasoning tokens and reasoning effort instead. The first request of a session is usually Codex warming up its connection: it has input tokens but no output or TTFT. The menu bar shows Codex's average speed with a `cx` prefix while its Speed switch is on.
+
 ## Installation
 
 ### Via Homebrew (Highly Recommended)

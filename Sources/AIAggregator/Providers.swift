@@ -24,12 +24,17 @@ final class ProvidersVisibility: ObservableObject {
         didSet { UserDefaults.standard.set(showClaudeCodeSpeed, forKey: Self.kClaudeCodeSpeed) }
     }
 
+    @Published var showCodexSpeed: Bool {
+        didSet { UserDefaults.standard.set(showCodexSpeed, forKey: Self.kCodexSpeed) }
+    }
+
     private static let kChatGPT      = "show.chatgpt"
     private static let kClaude       = "show.claude"
     private static let kGemini       = "show.gemini"
     private static let kChatGPTStats = "show.chatgpt.stats"
     private static let kClaudeStats  = "show.claude.stats"
     private static let kClaudeCodeSpeed = "show.claudecode.speed"
+    private static let kCodexSpeed = "show.codex.speed"
 
     private init() {
         let d = UserDefaults.standard
@@ -39,5 +44,6 @@ final class ProvidersVisibility: ObservableObject {
         showChatGPTStats = (d.object(forKey: Self.kChatGPTStats) as? Bool) ?? true
         showClaudeStats  = (d.object(forKey: Self.kClaudeStats)  as? Bool) ?? true
         showClaudeCodeSpeed = (d.object(forKey: Self.kClaudeCodeSpeed) as? Bool) ?? true
+        showCodexSpeed = (d.object(forKey: Self.kCodexSpeed) as? Bool) ?? true
     }
 }

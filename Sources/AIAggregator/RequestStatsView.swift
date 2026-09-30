@@ -51,16 +51,21 @@ struct StatsReport: Equatable {
 /// the full request history rather than the rows the table shows.
 struct RequestStatsView: View {
     @ObservedObject var log: RequestLog
-    @AppStorage("ClaudeCodeStatsPeriod") private var period: StatsPeriod = .today
+    @AppStorage private var period: StatsPeriod
     @State private var report: StatsReport?
+
+    init(log: RequestLog) {
+        self.log = log
+        _period = AppStorage(wrappedValue: .today, log.source.defaultsKey("StatsPeriod"))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             VSplitView {
-                StatsTable(title: "By model", keyTitle: "Model", rows: report?.byModel ?? [])
+                StatsTable(title: "By model", keyTitle: "Model", rows: report?.byModel ?? [], showsCost: log.source.reportsCost)
                     .frame(minHeight: 120, idealHeight: 200)
-                StatsTable(title: "By day", keyTitle: "Day", rows: report?.byDay ?? [])
+                StatsTable(title: "By day", keyTitle: "Day", rows: report?.byDay ?? [], showsCost: log.source.reportsCost)
                     .frame(minHeight: 120)
             }
         }
@@ -86,7 +91,7 @@ struct RequestStatsView: View {
                     if total.failures > 0 { Text("\(total.failures) failed").foregroundColor(.orange) }
                     Text("\(total.inputTokens.formatted()) in")
                     Text("\(total.outputTokens.formatted()) out")
-                    Text("est. cost \(formatMoney(total.costUsd))")
+                    if log.source.reportsCost { Text("est. cost \(formatMoney(total.costUsd))") }
                     Text("gen \(total.genTokensPerSec.map { "\(Int($0.rounded())) t/s" } ?? "–")")
                     Text("TTFT \(total.averageTtftMs.map(formatSecs) ?? "–")")
                     Spacer()
@@ -108,6 +113,7 @@ private struct StatsTable: View {
     let title: String
     let keyTitle: String
     let rows: [StatsRow]
+    let showsCost: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -129,7 +135,10 @@ private struct StatsTable: View {
                     Text(r.stats.averageOutputTokens.map { String(Int($0.rounded())) } ?? "–")
                 }
                 .width(60)
-                TableColumn("Cost") { (r: StatsRow) in Text(r.stats.reportedCostUsd.map(formatMoney) ?? "–") }.width(80)
+                TableColumn(showsCost ? "Cost" : "") { (r: StatsRow) in
+                    Text(showsCost ? r.stats.reportedCostUsd.map(formatMoney) ?? "–" : "")
+                }
+                .width(showsCost ? 80 : 0)
                 TableColumn("Gen t/s") { (r: StatsRow) in
                     Text(r.stats.genTokensPerSec.map { String(Int($0.rounded())) } ?? "–")
                 }
