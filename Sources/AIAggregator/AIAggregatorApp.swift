@@ -32,7 +32,7 @@ public struct AIAggregatorApp: App {
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        SpeedStatsService.start()
+        TelemetryListener.shared.start()
         // Lets a development build open straight to a requests window ("codex" for Codex's).
         if let which = ProcessInfo.processInfo.environment["AIAGGREGATOR_SHOW_REQUESTS"] {
             WindowManager.shared.showRequestsWindow(for: which == "codex" ? .codex : .claudeCode)

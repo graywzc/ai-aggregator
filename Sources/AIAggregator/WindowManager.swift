@@ -53,7 +53,7 @@ class WindowManager {
             let service = source == .codex ? SpeedStatsService.codex : SpeedStatsService.shared
             let hostingController = NSHostingController(rootView: RequestsView(log: service.log))
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 1250, height: 640),
+                contentRect: NSRect(x: 0, y: 0, width: 1330, height: 640),
                 styleMask: [.titled, .closable, .resizable, .miniaturizable],
                 backing: .buffered,
                 defer: false

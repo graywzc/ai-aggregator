@@ -37,13 +37,15 @@ struct StatsReport: Equatable {
     var total = RequestStats()
     var byModel: [StatsRow] = []
     var byDay: [StatsRow] = []
+    var byHost: [StatsRow] = []
 
     static func build(from database: RequestDatabase, period: StatsPeriod) -> StatsReport {
         let range = period.range()
         func rows(_ grouping: StatsGrouping) -> [StatsRow] {
             database.stats(from: range.from, to: range.to, by: grouping).map { StatsRow(key: $0.key, stats: $0.stats) }
         }
-        return StatsReport(total: rows(.total).first?.stats ?? RequestStats(), byModel: rows(.model), byDay: rows(.day))
+        return StatsReport(total: rows(.total).first?.stats ?? RequestStats(), byModel: rows(.model), byDay: rows(.day),
+                           byHost: rows(.host).map { StatsRow(key: HostName.label($0.key), stats: $0.stats) })
     }
 }
 
@@ -65,6 +67,8 @@ struct RequestStatsView: View {
             VSplitView {
                 StatsTable(title: "By model", keyTitle: "Model", rows: report?.byModel ?? [], showsCost: log.source.reportsCost)
                     .frame(minHeight: 120, idealHeight: 200)
+                StatsTable(title: "By host", keyTitle: "Host", rows: report?.byHost ?? [], showsCost: log.source.reportsCost)
+                    .frame(minHeight: 90, idealHeight: 120)
                 StatsTable(title: "By day", keyTitle: "Day", rows: report?.byDay ?? [], showsCost: log.source.reportsCost)
                     .frame(minHeight: 120)
             }

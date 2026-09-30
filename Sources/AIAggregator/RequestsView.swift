@@ -21,6 +21,8 @@ struct RequestsView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 200)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .trailing) { TailnetToggle(listener: .shared).padding(.trailing, 8) }
             .padding(.top, 8)
 
             switch tab {
@@ -28,7 +30,28 @@ struct RequestsView: View {
             case .stats: RequestStatsView(log: log)
             }
         }
-        .frame(minWidth: 1250, minHeight: 500)
+        .frame(minWidth: 1330, minHeight: 500)
+    }
+}
+
+/// Opt-in listening on this Mac's Tailscale address, for agents on the user's other machines.
+private struct TailnetToggle: View {
+    @ObservedObject var listener: TelemetryListener
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if listener.acceptTailnet {
+                if let endpoint = listener.tailnetEndpoint {
+                    Text("http://\(endpoint)").foregroundColor(.secondary).textSelection(.enabled)
+                } else if let error = listener.tailnetError {
+                    Text(error).foregroundColor(.orange)
+                }
+            }
+            Toggle("Accept from tailnet", isOn: $listener.acceptTailnet)
+                .toggleStyle(.switch).controlSize(.mini)
+                .help("Also listen on this Mac's Tailscale address, so agents on your other machines can export here")
+        }
+        .font(.system(size: 11))
     }
 }
 
@@ -39,18 +62,21 @@ struct RequestsView: View {
 struct RequestTableView: View {
     @ObservedObject var log: RequestLog
     @StateObject private var filter: ModelFilter
+    @StateObject private var hostFilter: ModelFilter
     @State private var selection: RequestSpeed.ID?
     @State private var confirmingClear = false
 
     init(log: RequestLog) {
         self.log = log
         _filter = StateObject(wrappedValue: ModelFilter(source: log.source))
+        _hostFilter = StateObject(wrappedValue: ModelFilter(source: log.source, field: .host))
     }
 
     /// Marks the Model header so the click hook can tell it from other columns.
     static let modelHeaderMarker = "▾"
+    static let hostHeaderMarker = "▿"
 
-    private var shown: [RequestSpeed] { filter.apply(log.requests) }
+    private var shown: [RequestSpeed] { hostFilter.apply(filter.apply(log.requests)) }
     private var rows: [RequestSpeed] { shown.reversed() }   // newest first
     private var selected: RequestSpeed? { selection.flatMap { id in log.requests.first { $0.id == id } } }
 
@@ -62,6 +88,9 @@ struct RequestTableView: View {
                     .background(HeaderClickPopover(marker: Self.modelHeaderMarker) {
                         ModelFilterPopover(filter: filter, log: log)
                     })
+                    .background(HeaderClickPopover(marker: Self.hostHeaderMarker) {
+                        ModelFilterPopover(filter: hostFilter, log: log)
+                    })
             }
             .frame(minHeight: 260, idealHeight: 420)
 
@@ -72,6 +101,9 @@ struct RequestTableView: View {
             // Drop a selection the filter hides, so the detail pane matches the table.
             if let selected, hidden.contains(selected.model) { selection = nil }
         }
+        .onChange(of: hostFilter.hidden) { hidden in
+            if let selected, hidden.contains(selected.host ?? "") { selection = nil }
+        }
     }
 
     private var isCodex: Bool { log.source == .codex }
@@ -81,6 +113,13 @@ struct RequestTableView: View {
         let visible = models.filter { filter.isShown($0.model) }.count
         let suffix = filter.isActive && visible < models.count ? " \(visible)/\(models.count)" : ""
         return "Model \(Self.modelHeaderMarker)\(suffix)"
+    }
+
+    private var hostHeader: String {
+        let hosts = ModelFilter.models(in: log.requests, field: .host)
+        let visible = hosts.filter { hostFilter.isShown($0.model) }.count
+        let suffix = hostFilter.isActive && visible < hosts.count ? " \(visible)/\(hosts.count)" : ""
+        return "Host \(Self.hostHeaderMarker)\(suffix)"
     }
 
     private var summary: some View {
@@ -95,7 +134,7 @@ struct RequestTableView: View {
             Text("\(ok.reduce(0) { $0 + $1.outputTokens }.formatted()) out")
             if log.source.reportsCost { Text("est. cost \(formatMoney(cost))") }
             if shown.count < log.requests.count {
-                Text("\(shown.count.formatted()) of the last \(log.requests.count.formatted()) shown; click Model to change")
+                Text("\(shown.count.formatted()) of the last \(log.requests.count.formatted()) shown; click Model or Host to change")
                     .foregroundColor(.secondary)
             } else if log.totalCount > log.requests.count {
                 Text("showing the last \(log.requests.count.formatted()) of \(log.totalCount.formatted()); see Stats for totals")
@@ -125,6 +164,8 @@ struct RequestTableView: View {
                     Text(r.date.formatted(date: .omitted, time: .standard))
                 }
                 .width(80)
+                TableColumn(hostHeader) { (r: RequestSpeed) in Text(HostName.label(r.host)) }
+                    .width(min: 50, ideal: 70)
                 TableColumn("Prompt") { (r: RequestSpeed) in
                     Text(promptLabel(r)).foregroundColor(log.promptText(for: r) == nil ? .secondary : .primary)
                         .help(log.promptText(for: r) ?? "")
