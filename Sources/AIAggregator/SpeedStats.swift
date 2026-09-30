@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 /// One Claude Code API request, as reported by its OpenTelemetry export.
 struct RequestSpeed: Identifiable, Equatable, Codable {
@@ -21,6 +22,8 @@ struct RequestSpeed: Identifiable, Equatable, Codable {
     var promptId: String? = nil
     var sessionId: String? = nil
     var attempt: Int? = nil
+    /// The tailnet machine that sent it, nil for this Mac.
+    var host: String? = nil
     /// Every attribute on the event, minus account identifiers.
     var attributes: [String: String] = [:]
 
@@ -54,6 +57,7 @@ struct RequestSpeed: Identifiable, Equatable, Codable {
         m.promptId = promptId ?? other.promptId
         m.sessionId = sessionId ?? other.sessionId
         m.attempt = attempt ?? other.attempt
+        m.host = host ?? other.host
         m.attributes = other.attributes.merging(attributes) { mine, _ in mine }
         return m
     }
@@ -204,7 +208,7 @@ final class SpeedStatsService: ObservableObject {
     static let maxRecent = 50
 
     @Published private(set) var recent: [RequestSpeed] = []   // newest last
-    @Published private(set) var listenerError: String? = nil
+    @Published fileprivate(set) var listenerError: String? = nil
 
     let source: RequestSource
     /// Full per-request history for the requests window; `recent` feeds the popover.
@@ -217,27 +221,7 @@ final class SpeedStatsService: ObservableObject {
         recent = Array(self.log.requests.filter(\.success).suffix(Self.maxRecent))
     }
 
-    private static var receiver: OTLPReceiver?
-
-    /// Starts the one loopback listener; each body goes to whichever agent sent it.
-    static func start() {
-        guard receiver == nil else { return }
-        let claude = shared, codex = self.codex
-        let codexParser = CodexOTLPParser()   // touched only on the receiver's queue
-        let receiver = OTLPReceiver(port: port) { body in
-            claude.ingest(OTLPParser.parseBatch(body))
-            codex.ingest(codexParser.parseBatch(body))
-        } onError: { message in
-            DispatchQueue.main.async {
-                claude.listenerError = message
-                codex.listenerError = message
-            }
-        }
-        self.receiver = receiver
-        receiver.start()
-    }
-
-    private func ingest(_ batch: (requests: [RequestSpeed], prompts: [PromptRecord])) {
+    fileprivate func ingest(_ batch: (requests: [RequestSpeed], prompts: [PromptRecord])) {
         guard !batch.requests.isEmpty || !batch.prompts.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             self?.log.record(batch.requests, prompts: batch.prompts)
@@ -287,5 +271,93 @@ final class SpeedStatsService: ObservableObject {
 
     private static func mean(_ values: [Double]) -> Double? {
         values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    }
+}
+
+/// The loopback listener both agents on this Mac export to, plus, when the user turns it
+/// on, one on this Mac's Tailscale address for their other machines. Each body goes to
+/// whichever agent sent it, tagged with the machine it came from.
+final class TelemetryListener: ObservableObject {
+    static let shared = TelemetryListener()
+    static let tailnetKey = "telemetry.acceptTailnet"
+
+    @Published var acceptTailnet: Bool {
+        didSet {
+            UserDefaults.standard.set(acceptTailnet, forKey: Self.tailnetKey)
+            updateTailnet()
+        }
+    }
+    /// Where other machines should send, e.g. "100.108.19.25:14318"; nil while not listening there.
+    @Published private(set) var tailnetEndpoint: String?
+    @Published private(set) var tailnetError: String?
+
+    private let queue = DispatchQueue(label: "com.graywzc.AIAggregator.otlp")
+    private let codexParser = CodexOTLPParser()     // touched only on `queue`
+    private var hostNames: [String: String] = [:]   // touched only on `queue`
+    private var loopback: OTLPReceiver?
+    private var tailnet: OTLPReceiver?
+    private var retryTimer: Timer?
+
+    private init() {
+        acceptTailnet = UserDefaults.standard.bool(forKey: Self.tailnetKey)
+    }
+
+    func start() {
+        guard loopback == nil else { return }
+        let receiver = makeReceiver(address: .loopback) { message in
+            SpeedStatsService.shared.listenerError = message
+            SpeedStatsService.codex.listenerError = message
+        }
+        loopback = receiver
+        receiver.start()
+        updateTailnet()
+    }
+
+    /// Tailscale may connect after launch, or its address change; try again every minute.
+    private func updateTailnet() {
+        tailnet?.stop()
+        tailnet = nil
+        tailnetEndpoint = nil
+        tailnetError = nil
+        retryTimer?.invalidate()
+        retryTimer = nil
+        guard acceptTailnet, loopback != nil else { return }
+
+        guard let address = Tailnet.localAddress() else {
+            tailnetError = "Tailscale is not connected"
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { [weak self] _ in self?.updateTailnet() }
+            return
+        }
+        let receiver = makeReceiver(address: address) { [weak self] message in
+            self?.tailnetError = message
+            if message != nil { self?.tailnetEndpoint = nil }
+        }
+        tailnet = receiver
+        tailnetEndpoint = "\(address):\(SpeedStatsService.port)"
+        receiver.start()
+    }
+
+    private func makeReceiver(address: IPv4Address, onError: @escaping (String?) -> Void) -> OTLPReceiver {
+        OTLPReceiver(address: address, port: SpeedStatsService.port, queue: queue) { [weak self] body, sender in
+            guard let self else { return }
+            let host = sender.map(self.hostName)
+            SpeedStatsService.shared.ingest(Self.tagged(OTLPParser.parseBatch(body), host: host))
+            SpeedStatsService.codex.ingest(Self.tagged(self.codexParser.parseBatch(body), host: host))
+        } onError: { message in
+            DispatchQueue.main.async { onError(message) }
+        }
+    }
+
+    private func hostName(for address: String) -> String {
+        if let name = hostNames[address] { return name }
+        let name = Tailnet.hostName(for: address)
+        hostNames[address] = name
+        return name
+    }
+
+    private static func tagged(_ batch: (requests: [RequestSpeed], prompts: [PromptRecord]), host: String?)
+        -> (requests: [RequestSpeed], prompts: [PromptRecord]) {
+        guard let host else { return batch }
+        return (batch.requests.map { var r = $0; r.host = host; return r }, batch.prompts)
     }
 }

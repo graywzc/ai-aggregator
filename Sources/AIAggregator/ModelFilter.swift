@@ -1,11 +1,34 @@
 import AppKit
 import SwiftUI
 
-/// Which models the requests table hides. Stored as the hidden set, so a model that
-/// starts appearing after the choice was made is shown until unchecked.
+/// Which models (or hosts) the requests table hides. Stored as the hidden set, so a value
+/// that starts appearing after the choice was made is shown until unchecked.
 final class ModelFilter: ObservableObject {
-    static func key(for source: RequestSource) -> String { source.defaultsKey("RequestsHiddenModels") }
+    /// The column a filter works on.
+    enum Field {
+        case model, host
+
+        func value(of r: RequestSpeed) -> String {
+            switch self {
+            case .model: return r.model
+            case .host: return r.host ?? ""
+            }
+        }
+
+        func label(_ value: String) -> String {
+            switch self {
+            case .model: return ModelFilter.label(value)
+            case .host: return HostName.label(value)
+            }
+        }
+    }
+
+    static func key(for source: RequestSource, field: Field = .model) -> String {
+        source.defaultsKey(field == .model ? "RequestsHiddenModels" : "RequestsHiddenHosts")
+    }
     static let key = key(for: .claudeCode)
+
+    let field: Field
 
     @Published var hidden: Set<String> {
         didSet { defaults.set(hidden.sorted(), forKey: key) }
@@ -13,9 +36,10 @@ final class ModelFilter: ObservableObject {
     private let defaults: UserDefaults
     private let key: String
 
-    init(defaults: UserDefaults = .standard, source: RequestSource = .claudeCode) {
+    init(defaults: UserDefaults = .standard, source: RequestSource = .claudeCode, field: Field = .model) {
         self.defaults = defaults
-        key = Self.key(for: source)
+        self.field = field
+        key = Self.key(for: source, field: field)
         hidden = Set(defaults.stringArray(forKey: key) ?? [])
         defaults.removeObject(forKey: "ClaudeCodeRequestsModel")   // 1.6.1's single-model picker
     }
@@ -23,7 +47,7 @@ final class ModelFilter: ObservableObject {
     var isActive: Bool { !hidden.isEmpty }
 
     func apply(_ requests: [RequestSpeed]) -> [RequestSpeed] {
-        hidden.isEmpty ? requests : requests.filter { !hidden.contains($0.model) }
+        hidden.isEmpty ? requests : requests.filter { !hidden.contains(field.value(of: $0)) }
     }
 
     func isShown(_ model: String) -> Bool { !hidden.contains(model) }
@@ -33,8 +57,8 @@ final class ModelFilter: ObservableObject {
     }
 
     /// Every model among `requests`, sorted, with how many requests each has.
-    static func models(in requests: [RequestSpeed]) -> [(model: String, count: Int)] {
-        Dictionary(grouping: requests, by: \.model)
+    static func models(in requests: [RequestSpeed], field: Field = .model) -> [(model: String, count: Int)] {
+        Dictionary(grouping: requests, by: field.value)
             .map { (model: $0.key, count: $0.value.count) }
             .sorted { $0.model < $1.model }
     }
@@ -44,13 +68,13 @@ final class ModelFilter: ObservableObject {
     }
 }
 
-/// The checklist that drops down from the table's Model header.
+/// The checklist that drops down from the table's Model or Host header.
 struct ModelFilterPopover: View {
     @ObservedObject var filter: ModelFilter
     @ObservedObject var log: RequestLog
 
     var body: some View {
-        let models = ModelFilter.models(in: log.requests)
+        let models = ModelFilter.models(in: log.requests, field: filter.field)
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button("Select all") { filter.hidden = [] }
@@ -67,7 +91,7 @@ struct ModelFilterPopover: View {
                 Toggle(isOn: Binding(get: { filter.isShown(entry.model) },
                                      set: { filter.set(entry.model, shown: $0) })) {
                     HStack {
-                        Text(ModelFilter.label(entry.model))
+                        Text(filter.field.label(entry.model))
                         Spacer(minLength: 16)
                         Text(entry.count.formatted()).foregroundColor(.secondary)
                     }
@@ -145,5 +169,16 @@ struct HeaderClickPopover<Content: View>: NSViewRepresentable {
             popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
             self.popover = popover
         }
+    }
+}
+
+/// How the tables name the machine a request came from.
+enum HostName {
+    /// This Mac's name, for requests its own agents sent (stored with no host).
+    static let local = Tailnet.shortName(ProcessInfo.processInfo.hostName)
+
+    static func label(_ host: String?) -> String {
+        guard let host, !host.isEmpty else { return local }
+        return host
     }
 }

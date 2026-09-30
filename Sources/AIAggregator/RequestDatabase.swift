@@ -29,6 +29,8 @@ enum StatsGrouping {
     case model
     /// Calendar day in the local time zone, as `YYYY-MM-DD`.
     case day
+    /// The machine that sent it; "" for this Mac.
+    case host
 }
 
 /// SQLite store of every Claude Code request the app has seen, uncapped, so totals and
@@ -53,6 +55,10 @@ final class RequestDatabase: @unchecked Sendable {
         exec("PRAGMA journal_mode=WAL")
         exec("PRAGMA synchronous=NORMAL")
         exec(Self.schema)
+        // Databases from before 1.8 lack the host column.
+        if !query("PRAGMA table_info(requests)", [], { Self.text($0, 1) }).contains("host") {
+            exec("ALTER TABLE requests ADD COLUMN host TEXT")
+        }
     }
 
     deinit { sqlite3_close_v2(db) }
@@ -136,6 +142,7 @@ final class RequestDatabase: @unchecked Sendable {
         switch grouping {
         case .total: key = "'all'"; order = "key"
         case .model: key = "model"; order = "cost DESC, requests DESC, key"
+        case .host: key = "COALESCE(host, '')"; order = "requests DESC, key"
         case .day: key = "date(date, 'unixepoch', 'localtime')"; order = "key DESC"
         }
         let rated = "success AND ttft_ms IS NOT NULL AND duration_ms > ttft_ms AND output_tokens >= \(RequestSpeed.minOutputTokens)"
@@ -194,7 +201,8 @@ final class RequestDatabase: @unchecked Sendable {
             prompt_id TEXT,
             session_id TEXT,
             attempt INTEGER,
-            attributes TEXT NOT NULL
+            attributes TEXT NOT NULL,
+            host TEXT
         );
         CREATE INDEX IF NOT EXISTS requests_date ON requests(date);
         CREATE INDEX IF NOT EXISTS requests_model_date ON requests(model, date);
@@ -208,16 +216,16 @@ final class RequestDatabase: @unchecked Sendable {
     private static let columns = """
         id, date, model, success, error, input_tokens, output_tokens, uncached_input_tokens, \
         cache_read_tokens, cache_creation_tokens, duration_ms, ttft_ms, cost_usd, query_source, \
-        prompt_id, session_id, attempt, attributes
+        prompt_id, session_id, attempt, attributes, host
         """
 
     private static let upsertRequest =
-        "INSERT OR REPLACE INTO requests (\(columns)) VALUES (\(Array(repeating: "?", count: 18).joined(separator: ",")))"
+        "INSERT OR REPLACE INTO requests (\(columns)) VALUES (\(Array(repeating: "?", count: 19).joined(separator: ",")))"
 
     private static func bindings(_ r: RequestSpeed) -> [Any?] {
         [r.id, r.date.timeIntervalSince1970, r.model, r.success, r.error, r.inputTokens, r.outputTokens,
          r.uncachedInputTokens, r.cacheReadTokens, r.cacheCreationTokens, r.durationMs, r.ttftMs, r.costUsd,
-         r.querySource, r.promptId, r.sessionId, r.attempt, encodeAttributes(r.attributes)]
+         r.querySource, r.promptId, r.sessionId, r.attempt, encodeAttributes(r.attributes), r.host]
     }
 
     private static func request(_ stmt: OpaquePointer) -> RequestSpeed {
@@ -240,6 +248,7 @@ final class RequestDatabase: @unchecked Sendable {
         r.sessionId = text(stmt, 15)
         r.attempt = int(stmt, 16)
         r.attributes = decodeAttributes(text(stmt, 17))
+        r.host = text(stmt, 18)
         return r
     }
 

@@ -68,6 +68,17 @@ exporter = { otlp-http = { endpoint = "http://127.0.0.1:14318/v1/logs", protocol
 
 Codex reports each response's token counts (input includes cached tokens, output includes reasoning tokens) and TTFT. It reports no request duration, so Total is the time from Codex's request event to its response-completed event. Codex reports no cost or stop reason either. Those two columns show reasoning tokens and reasoning effort instead. The first request of a session is usually Codex warming up its connection: it has input tokens but no output or TTFT. The menu bar shows Codex's average speed with a `cx` prefix while its Speed switch is on.
 
+## Requests from your other machines
+
+Agents on your other Macs can export to this one over [Tailscale](https://tailscale.com). Turn on **Accept from tailnet** at the top of either requests window: AIAggregator then also listens on this Mac's Tailscale address (shown next to the switch), taking connections from tailnet addresses only. On the other machine, point the agent at this Mac's MagicDNS name instead of `127.0.0.1`, for example in that machine's Codex config:
+
+```toml
+[otel]
+exporter = { otlp-http = { endpoint = "http://mba.your-tailnet.ts.net:14318/v1/logs", protocol = "json" } }
+```
+
+or, for Claude Code, `"OTEL_EXPORTER_OTLP_ENDPOINT": "http://mba.your-tailnet.ts.net:14318"`. Each request records the machine it came from, by its MagicDNS name. The Host column shows it, and its header filters by it like the Model header does. The Stats tab adds a breakdown by host. Requests from this Mac show its own name. Leave prompt logging off on a machine that sends large documents to its agent, or the full text travels with each export. Exports sent while this Mac is asleep or off the tailnet are lost.
+
 ## Installation
 
 ### Via Homebrew (Highly Recommended)
