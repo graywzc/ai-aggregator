@@ -25,6 +25,7 @@ class WindowManager {
     private var loginWindow: NSWindow?
     private var authWindow: NSWindow?
     private var requestsWindows: [RequestSource: NSWindow] = [:]
+    private var turnsWindow: NSWindow?
 
     func showLoginWindow() {
         if loginWindow == nil {
@@ -68,6 +69,28 @@ class WindowManager {
         }
         NSApplication.shared.activate(ignoringOtherApps: true)
         requestsWindows[source]?.makeKeyAndOrderFront(nil)
+    }
+
+    func showTurnsWindow() {
+        if turnsWindow == nil {
+            let hostingController = NSHostingController(rootView: TurnsView(log: SpeedStatsService.shared.log))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720),
+                styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Claude Code Turns"
+            window.contentViewController = hostingController
+            window.setContentSize(NSSize(width: 1280, height: 720))   // the hosting controller shrank it to the view's minimum
+            window.center()
+            window.setFrameAutosaveName("ClaudeCodeTurnsWindow")
+            window.moveToGUIScreen()
+            window.isReleasedWhenClosed = false
+            turnsWindow = window
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        turnsWindow?.makeKeyAndOrderFront(nil)
     }
 
     func showAuthWindow(for provider: AuthProvider) {

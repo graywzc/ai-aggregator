@@ -102,6 +102,15 @@ private struct SpeedSection: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Show every \(stats.source.name) request")
+                if stats.source == .claudeCode {
+                    Button {
+                        WindowManager.shared.showTurnsWindow()
+                    } label: {
+                        Image(systemName: "chart.bar.doc.horizontal").font(.system(size: 11))
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Show each turn end to end: model requests, tool calls and waiting")
+                }
                 Text("Speed").font(.caption2).foregroundColor(.secondary)
                 Toggle("", isOn: $isOn)
                     .toggleStyle(.switch).controlSize(.mini).labelsHidden()

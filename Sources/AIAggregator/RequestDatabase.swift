@@ -33,7 +33,7 @@ enum StatsGrouping {
     case host
 }
 
-/// SQLite store of every Claude Code request the app has seen, uncapped, so totals and
+/// SQLite store of every request and trace span the app has seen from an agent, uncapped, so totals and
 /// per-model figures can be asked for over any period. One serial queue guards the
 /// connection, so any thread may call in.
 final class RequestDatabase: @unchecked Sendable {
@@ -99,7 +99,59 @@ final class RequestDatabase: @unchecked Sendable {
         queue.sync {
             run("DELETE FROM requests", [])
             run("DELETE FROM prompts", [])
+            run("DELETE FROM spans", [])
         }
+    }
+
+    // MARK: - Trace spans
+
+    func insert(spans: [TraceSpan]) {
+        guard !spans.isEmpty else { return }
+        queue.sync {
+            exec("BEGIN")
+            for s in spans {
+                run("INSERT OR REPLACE INTO spans (\(Self.spanColumns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [s.id, s.traceId, s.parentId, s.kind.rawValue, s.start.timeIntervalSince1970,
+                     s.end.timeIntervalSince1970, s.sessionId, s.host, Self.encodeAttributes(s.attributes)])
+            }
+            exec("COMMIT")
+        }
+    }
+
+    /// The newest `limit` turns that started in `[from, to)`, as their interaction spans
+    /// plus every span sharing a trace with one of them.
+    func turnSpans(from: Date?, to: Date?, limit: Int) -> [TraceSpan] {
+        var clauses = ["kind = 'interaction'"]
+        var binds: [Any?] = []
+        if let from { clauses.append("start >= ?"); binds.append(from.timeIntervalSince1970) }
+        if let to { clauses.append("start < ?"); binds.append(to.timeIntervalSince1970) }
+        binds.append(limit)
+        let turns = "SELECT id, trace_id FROM spans WHERE \(clauses.joined(separator: " AND ")) ORDER BY start DESC LIMIT ?"
+        return queue.sync {
+            let wanted = Set(query("SELECT id FROM (\(turns))", binds) { Self.text($0, 0) ?? "" })
+            let sql = "SELECT \(Self.spanColumns) FROM spans WHERE trace_id IN (SELECT trace_id FROM (\(turns))) ORDER BY start"
+            return query(sql, binds, Self.span).filter { $0.kind != .interaction || wanted.contains($0.id) }
+        }
+    }
+
+    func turnCount() -> Int {
+        queue.sync {
+            query("SELECT COUNT(*) FROM spans WHERE kind = 'interaction'", []) { Int(sqlite3_column_int64($0, 0)) }.first ?? 0
+        }
+    }
+
+    private static let spanColumns = "id, trace_id, parent_id, kind, start, end, session_id, host, attributes"
+
+    private static func span(_ stmt: OpaquePointer) -> TraceSpan {
+        var s = TraceSpan(
+            id: text(stmt, 0) ?? "", traceId: text(stmt, 1) ?? "", parentId: text(stmt, 2),
+            kind: TraceSpan.Kind(rawValue: text(stmt, 3) ?? "") ?? .tool,
+            start: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4)),
+            end: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5)))
+        s.sessionId = text(stmt, 6)
+        s.host = text(stmt, 7)
+        s.attributes = decodeAttributes(text(stmt, 8))
+        return s
     }
 
     // MARK: - Prompts
@@ -211,6 +263,19 @@ final class RequestDatabase: @unchecked Sendable {
             text TEXT NOT NULL,
             date REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS spans (
+            id TEXT PRIMARY KEY,
+            trace_id TEXT NOT NULL,
+            parent_id TEXT,
+            kind TEXT NOT NULL,
+            start REAL NOT NULL,
+            end REAL NOT NULL,
+            session_id TEXT,
+            host TEXT,
+            attributes TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS spans_kind_start ON spans(kind, start);
+        CREATE INDEX IF NOT EXISTS spans_trace ON spans(trace_id);
         """
 
     private static let columns = """

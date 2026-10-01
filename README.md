@@ -56,6 +56,19 @@ sqlite3 ~/Library/Application\ Support/AIAggregator/claude-code.sqlite "select d
 
 Internal calls such as the auto-mode permission classifier appear too, labeled by their source; Claude Code reports no TTFT for them. The Prompt column shows your prompt text only if you also set `"OTEL_LOG_USER_PROMPTS": "1"`; that text is then stored in the same folder.
 
+### Turns: end to end
+
+The chart icon next to "Claude Code" in the popover opens the Turns window. A turn is one prompt and everything Claude Code did to answer it: the rounds of model requests, the tool calls between them, permission checks and hooks. Each row shows the turn's end-to-end time and how it splits between waiting on the model, tools running on the machine, permission checks, waiting on you (a permission prompt or a question), hooks, and Claude Code's own work in between. Selecting a turn lays its steps out on a timeline; steps inside a subagent are indented under the Agent call.
+
+The Compare tab puts machines side by side: each host's share of time per group, and for every kind of step (a model, a tool, or the program a shell command runs, such as `swift build` or `git push`) the number of calls with total, median, 90th-percentile and longest time on each host. Tool times there leave out the permission phase, so they measure the machine. To compare this Mac with another, send that machine's telemetry here as described under [Requests from your other machines](#requests-from-your-other-machines).
+
+Turns come from the trace export, which the settings above already turn on (`OTEL_TRACES_EXPORTER` and `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`). A turn appears when it finishes. Two optional settings add detail:
+
+- `"OTEL_LOG_TOOL_DETAILS": "1"` sends each shell command, which is what sorts Bash calls into build, test, install, git and search. Without it every Bash call is just "Bash". The commands are stored in the database.
+- `"OTEL_LOG_USER_PROMPTS": "1"` labels each turn with its prompt.
+
+The start and end of every step are Claude Code's own; the split is worked out from them by giving each moment of the turn to the innermost step running then, so parallel tool calls aren't counted twice and the parts add up to the whole. Spans are kept in the `spans` table of the same database.
+
 ## Codex requests
 
 Codex, the coding agent in the ChatGPT app and the `codex` CLI, can send the same kind of per-request telemetry. The list icon next to "Codex" in the popover opens a Codex Requests window with the same table and Stats tab, kept in its own database at `~/Library/Application Support/AIAggregator/codex.sqlite`. Turn it on by adding this to `~/.codex/config.toml`, then start a new Codex session:
