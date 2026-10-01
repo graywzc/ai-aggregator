@@ -1,11 +1,15 @@
 import SwiftUI
 
-/// A coding agent's requests window: the per-request table and the stats tab.
+/// A coding agent's requests window: the per-request table and the stats tab, plus for
+/// Claude Code the turns its requests and tool calls add up to.
 struct RequestsView: View {
     @ObservedObject var log: RequestLog
     @AppStorage private var tab: Tab
 
-    enum Tab: String { case requests, stats }
+    enum Tab: String { case requests, stats, turns }
+
+    /// Only Claude Code exports the trace spans turns are built from.
+    private var showsTurns: Bool { log.source == .claudeCode }
 
     init(log: RequestLog) {
         self.log = log
@@ -17,10 +21,13 @@ struct RequestsView: View {
             Picker("", selection: $tab) {
                 Text("Requests").tag(Tab.requests)
                 Text("Stats").tag(Tab.stats)
+                if showsTurns {
+                    Text("Turns").tag(Tab.turns)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 200)
+            .frame(width: showsTurns ? 300 : 200)
             .frame(maxWidth: .infinity)
             .overlay(alignment: .trailing) { TailnetToggle(listener: .shared).padding(.trailing, 8) }
             .padding(.top, 8)
@@ -28,6 +35,7 @@ struct RequestsView: View {
             switch tab {
             case .requests: RequestTableView(log: log)
             case .stats: RequestStatsView(log: log)
+            case .turns: TurnsView(log: log)
             }
         }
         .frame(minWidth: 1330, minHeight: 500)

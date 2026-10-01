@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The turns window: each prompt end to end, as the rounds of model requests and tool calls
+/// The Turns tab of the requests window: each prompt end to end, as the rounds of model requests and tool calls
 /// Claude Code made to answer it, and how that time compares between machines.
 struct TurnsView: View {
     @ObservedObject var log: RequestLog
@@ -34,7 +34,6 @@ struct TurnsView: View {
                 }
             }
         }
-        .frame(minWidth: 1100, minHeight: 520)
         .task(id: "\(period.rawValue)#\(log.spanRevision)") {
             let database = log.database
             let range = period.range()
