@@ -162,6 +162,9 @@ struct TurnTelemetryTests {
         #expect(kind("grep -E \"make|git\" notes.txt") == "search: grep")
         #expect(kind("ssh aipc \"cd repo && git pull\"") == "git: git pull")
         #expect(kind("ssh aipc") == "shell: ssh")
+        // Loop and condition keywords aren't programs.
+        #expect(kind("for d in a b; do git -C $d status; done") == "git: git status")
+        #expect(kind("if swift build; then echo ok; fi") == "build: swift build")
 
         #expect(Activity.of(tool: "Bash", command: nil).activity == .shell)
         #expect(Activity.of(tool: "Grep", command: nil).activity == .search)

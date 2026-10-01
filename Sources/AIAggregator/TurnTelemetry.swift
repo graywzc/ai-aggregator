@@ -165,8 +165,13 @@ enum ShellCommand {
     }
 
     /// Words that only set up the command that follows them.
-    private static let wrappers: Set<String> = ["sudo", "time", "env", "nohup", "command", "exec", "caffeinate", "nice", "xcrun"]
-    private static let navigation: Set<String> = ["cd", "pushd", "popd", "export", "source", "set", "echo", "true", "sleep"]
+    private static let wrappers: Set<String> = [
+        "sudo", "time", "env", "nohup", "command", "exec", "caffeinate", "nice", "xcrun",
+        "do", "then", "else", "if", "while", "until",
+    ]
+    private static let navigation: Set<String> = [
+        "cd", "pushd", "popd", "export", "source", "set", "echo", "true", "sleep", "for", "done", "fi",
+    ]
     /// Programs whose first argument names what they do.
     private static let subcommandTools: Set<String> = [
         "swift", "git", "gh", "cargo", "go", "npm", "yarn", "pnpm", "bun", "brew", "pip", "pip3", "uv", "docker",
@@ -263,7 +268,8 @@ enum ShellCommand {
             return remote.isEmpty ? (.shell, "ssh") : classify(remote)
         }
         let args = words.dropFirst().filter { !$0.hasPrefix("-") }
-        let verb = args.first
+        // A subcommand is a plain word; `git -C $dir status` has a flag's value before it.
+        let verb = args.first { $0.range(of: "^[a-z][a-z0-9:_-]*$", options: .regularExpression) != nil }
         let head = Set(args.prefix(3))
         let label = subcommandTools.contains(program) && verb != nil ? "\(program) \(verb!)" : program
 

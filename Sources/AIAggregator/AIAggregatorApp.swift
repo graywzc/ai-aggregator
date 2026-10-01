@@ -33,14 +33,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
     public func applicationDidFinishLaunching(_ notification: Notification) {
         TelemetryListener.shared.start()
-        // Lets a development build open straight to a requests window ("codex" for Codex's,
-        // "turns" for the turns window).
+        // Lets a development build open straight to a requests window ("codex" for Codex's).
         if let which = ProcessInfo.processInfo.environment["AIAGGREGATOR_SHOW_REQUESTS"] {
-            if which == "turns" {
-                WindowManager.shared.showTurnsWindow()
-            } else {
-                WindowManager.shared.showRequestsWindow(for: which == "codex" ? .codex : .claudeCode)
-            }
+            WindowManager.shared.showRequestsWindow(for: which == "codex" ? .codex : .claudeCode)
         }
     }
 }
