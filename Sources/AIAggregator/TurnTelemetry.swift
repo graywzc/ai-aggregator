@@ -157,14 +157,13 @@ enum ShellCommand {
         // A heredoc body is input to a program, not commands.
         let script = command.range(of: "<<").map { String(command[..<$0.lowerBound]) } ?? command
         var best: (activity: Activity, label: String)?
-        for segment in script.components(separatedBy: separators) {
-            guard let found = classify(words: words(in: segment)) else { continue }
+        for segment in segments(of: script) {
+            guard let found = classify(words: program(of: segment)) else { continue }
             if best == nil || rank(found.activity) > rank(best!.activity) { best = found }
         }
         return best ?? (.shell, "shell")
     }
 
-    private static let separators = CharacterSet(charactersIn: "\n;|&")
     /// Words that only set up the command that follows them.
     private static let wrappers: Set<String> = ["sudo", "time", "env", "nohup", "command", "exec", "caffeinate", "nice", "xcrun"]
     private static let navigation: Set<String> = ["cd", "pushd", "popd", "export", "source", "set", "echo", "true", "sleep"]
@@ -205,23 +204,47 @@ enum ShellCommand {
         }
     }
 
-    /// The segment's words from its program on, the program reduced to its file name.
-    private static func words(in segment: String) -> [String] {
-        var words = segment.split(whereSeparator: \.isWhitespace)
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "()'\"`")) }
-            .filter { !$0.isEmpty }
+    /// Splits a script into its commands, each a list of words, at unquoted `;`, `|`, `&`
+    /// and newlines. Quotes group a word and are dropped from it.
+    private static func segments(of script: String) -> [[String]] {
+        var segments: [[String]] = [[]]
+        var word = ""
+        var hasWord = false
+        var quote: Character?
+        func endWord() {
+            if hasWord { segments[segments.count - 1].append(word) }
+            word = ""
+            hasWord = false
+        }
+        for c in script {
+            if let q = quote {
+                if c == q { quote = nil } else { word.append(c) }
+            } else if c == "'" || c == "\"" {
+                quote = c
+                hasWord = true
+            } else if c == "\n" || c == ";" || c == "|" || c == "&" {
+                endWord()
+                segments.append([])
+            } else if c.isWhitespace {
+                endWord()
+            } else if c != "(" && c != ")" {
+                word.append(c)
+                hasWord = true
+            }
+        }
+        endWord()
+        return segments.filter { !$0.isEmpty }
+    }
+
+    /// A command's words from its program on, the program reduced to its file name.
+    private static func program(of segment: [String]) -> [String] {
+        var words = segment
         while let first = words.first {
             let isAssignment = first.range(of: "^[A-Za-z_][A-Za-z0-9_]*=", options: .regularExpression) != nil
             if isAssignment || wrappers.contains(first) || first.hasPrefix("-") {
                 words.removeFirst()
             } else if first == "timeout", words.count > 1 {
                 words.removeFirst(2)
-            } else if first == "ssh" {
-                // `ssh host command…`: what counts is the command run over there.
-                words.removeFirst()
-                while let w = words.first, w.hasPrefix("-") { words.removeFirst(w.count == 2 ? min(2, words.count) : 1) }
-                if !words.isEmpty { words.removeFirst() }
-                if words.isEmpty { return ["ssh"] }
             } else {
                 break
             }
@@ -232,6 +255,13 @@ enum ShellCommand {
 
     private static func classify(words: [String]) -> (activity: Activity, label: String)? {
         guard let program = words.first, !navigation.contains(program) else { return nil }
+        if program == "ssh" {
+            // `ssh host command…`: what counts is the command run over there.
+            var rest = Array(words.dropFirst())
+            while let w = rest.first, w.hasPrefix("-") { rest.removeFirst(w.count == 2 ? min(2, rest.count) : 1) }
+            let remote = rest.dropFirst().joined(separator: " ")
+            return remote.isEmpty ? (.shell, "ssh") : classify(remote)
+        }
         let args = words.dropFirst().filter { !$0.hasPrefix("-") }
         let verb = args.first
         let head = Set(args.prefix(3))

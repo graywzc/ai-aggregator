@@ -157,6 +157,11 @@ struct TurnTelemetryTests {
         #expect(kind("ls -la && cat README.md") == "shell: ls")
         #expect(kind("python3 - <<'EOF'\nimport git\nmake = 1\nEOF") == "shell: python3")
         #expect(kind("cd /tmp") == "shell: shell")
+        // Quoted words stay whole, so an assignment with spaces isn't taken for a program.
+        #expect(kind("sleep 6; DB=\"file:$HOME/Library/Application Support/x.sqlite?mode=ro\"; sqlite3 \"$DB\" \"select 1\"") == "shell: sqlite3")
+        #expect(kind("grep -E \"make|git\" notes.txt") == "search: grep")
+        #expect(kind("ssh aipc \"cd repo && git pull\"") == "git: git pull")
+        #expect(kind("ssh aipc") == "shell: ssh")
 
         #expect(Activity.of(tool: "Bash", command: nil).activity == .shell)
         #expect(Activity.of(tool: "Grep", command: nil).activity == .search)
