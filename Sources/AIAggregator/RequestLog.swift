@@ -14,6 +14,8 @@ final class RequestLog: ObservableObject {
     @Published private(set) var totalCount = 0
     /// Bumped on every change, so stats views know when to re-query.
     @Published private(set) var revision = 0
+    /// Bumped when trace spans arrive, for the turns window.
+    @Published private(set) var spanRevision = 0
 
     let source: RequestSource
     let database: RequestDatabase
@@ -61,17 +63,24 @@ final class RequestLog: ObservableObject {
         revision += 1
     }
 
+    /// Stores trace spans. Callable from any thread.
+    func record(spans: [TraceSpan]) {
+        database.insert(spans: spans)
+        DispatchQueue.main.async { [weak self] in self?.spanRevision += 1 }
+    }
+
     func promptText(for request: RequestSpeed) -> String? {
         request.promptId.flatMap { prompts[$0]?.text }
     }
 
-    /// Deletes every stored request and prompt.
+    /// Deletes every stored request, prompt and turn.
     func clear() {
         database.deleteAll()
         requests = []
         prompts = [:]
         totalCount = 0
         revision += 1
+        spanRevision += 1
     }
 
     private func load() {

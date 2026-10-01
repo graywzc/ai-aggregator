@@ -157,7 +157,7 @@ enum OTLPParser {
     }
 
     /// Attributes that identify the account rather than describe the request.
-    private static let identityKeys: Set<String> = [
+    static let identityKeys: Set<String> = [
         "user.id", "user.email", "user.account_uuid", "user.account_id", "organization.id",
     ]
 
@@ -219,6 +219,12 @@ final class SpeedStatsService: ObservableObject {
         self.source = source
         self.log = log ?? RequestLog(directory: nil, source: source)
         recent = Array(self.log.requests.filter(\.success).suffix(Self.maxRecent))
+    }
+
+    /// Trace spans for the turns window. They go straight to the database, off the main thread.
+    fileprivate func ingest(spans: [TraceSpan]) {
+        guard !spans.isEmpty else { return }
+        log.record(spans: spans)
     }
 
     fileprivate func ingest(_ batch: (requests: [RequestSpeed], prompts: [PromptRecord])) {
@@ -342,6 +348,7 @@ final class TelemetryListener: ObservableObject {
             guard let self else { return }
             let host = sender.map(self.hostName)
             SpeedStatsService.shared.ingest(Self.tagged(OTLPParser.parseBatch(body), host: host))
+            SpeedStatsService.shared.ingest(spans: TraceSpanParser.parse(body).map { var s = $0; s.host = host; return s })
             SpeedStatsService.codex.ingest(Self.tagged(self.codexParser.parseBatch(body), host: host))
         } onError: { message in
             DispatchQueue.main.async { onError(message) }

@@ -146,7 +146,7 @@ struct RequestTableView: View {
                                     isPresented: $confirmingClear, titleVisibility: .visible) {
                     Button("Delete", role: .destructive) { log.clear(); selection = nil }
                 } message: {
-                    Text("This removes the whole history from the database, not just the rows shown.")
+                    Text("This removes the whole history from the database, not just the rows shown, and the turns recorded with it.")
                 }
         }
         .font(.system(size: 12, design: .monospaced))
