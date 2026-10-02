@@ -249,6 +249,18 @@ struct TurnTelemetryTests {
         #expect(close(local.totalMs, 60_000))
         #expect(close(builds.first { $0.host == "aipc" }?.medianMs, 6000))
         #expect(report.activities.first?.activity == .model)
+
+        // The same step on both machines shares a row.
+        let rows = report.comparison(of: HostName.local, with: "aipc")
+        #expect(rows.map(\.label) == ["opus-5-5", "swift build"])
+        #expect(close(rows[1].first?.medianMs, 20_000))
+        #expect(close(rows[1].second?.medianMs, 6000))
+        #expect(close(rows[1].ratio, 0.3))
+        let alone = report.comparison(of: "aipc", with: "aipc1")
+        #expect(alone.map(\.label) == ["opus-5-5", "swift build"])
+        #expect(alone[1].first?.count == 1)
+        #expect(alone[1].second == nil)
+        #expect(alone[1].ratio == nil)
     }
 
     @Test func formatsSpans() {

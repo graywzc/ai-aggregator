@@ -497,9 +497,37 @@ struct HostSummary: Identifiable, Equatable {
     var id: String { host }
 }
 
+/// One kind of step on two machines.
+struct StepComparison: Identifiable, Equatable {
+    let activity: Activity
+    let label: String
+    var first: ActivityStat? = nil
+    var second: ActivityStat? = nil
+
+    var id: String { "\(activity.rawValue)|\(label)" }
+
+    /// The second machine's median over the first's, when both ran the step.
+    var ratio: Double? {
+        guard let a = first?.medianMs, let b = second?.medianMs, a > 0, b > 0 else { return nil }
+        return b / a
+    }
+}
+
 struct TurnReport: Equatable {
     var hosts: [HostSummary] = []
     var activities: [ActivityStat] = []
+
+    /// Every kind of step either machine ran, the two machines' numbers on one row.
+    func comparison(of first: String, with second: String) -> [StepComparison] {
+        var rows: [StepComparison] = []
+        for stat in activities where stat.host == first || stat.host == second {
+            if rows.last?.activity != stat.activity || rows.last?.label != stat.label {
+                rows.append(StepComparison(activity: stat.activity, label: stat.label))
+            }
+            if stat.host == first { rows[rows.count - 1].first = stat } else { rows[rows.count - 1].second = stat }
+        }
+        return rows
+    }
 
     static func build(from turns: [Turn]) -> TurnReport {
         var hosts: [String: HostSummary] = [:]
