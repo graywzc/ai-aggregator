@@ -30,7 +30,7 @@ struct TurnsView: View {
             } else {
                 switch tab {
                 case .turns: TurnListView(turns: turns)
-                case .compare: TurnCompareView(report: TurnReport.build(from: turns))
+                case .compare: TurnCompareView(report: TurnReport.build(from: loaded ?? []))
                 }
             }
         }
@@ -57,13 +57,16 @@ struct TurnsView: View {
                     ForEach(StatsPeriod.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 460)
-                Picker("Host", selection: $host) {
-                    Text("All hosts").tag(Self.allHosts)
-                    ForEach(hosts, id: \.self) { Text($0).tag($0) }
+                // Compare picks its own two hosts.
+                if tab == .turns {
+                    Picker("Host", selection: $host) {
+                        Text("All hosts").tag(Self.allHosts)
+                        ForEach(hosts, id: \.self) { Text($0).tag($0) }
+                    }
+                    .frame(width: 170)
                 }
-                .frame(width: 170)
                 Spacer()
-                if turns.count >= Self.maxTurns {
+                if (loaded ?? []).count >= Self.maxTurns {
                     Text("newest \(Self.maxTurns.formatted()) turns").font(.system(size: 11)).foregroundColor(.secondary)
                 }
             }
@@ -272,10 +275,30 @@ private struct StepRow: View {
 
 // MARK: - Compare
 
-/// Machines side by side: where each one's turn time went, and how long each kind of
-/// step took on it.
+/// Machines side by side: where each one's turn time went, and how long the same kind of
+/// step took on two of them.
 private struct TurnCompareView: View {
     let report: TurnReport
+    @AppStorage("ClaudeCodeTurnsCompareFirst") private var chosenFirst = ""
+    @AppStorage("ClaudeCodeTurnsCompareSecond") private var chosenSecond = ""
+    @AppStorage("ClaudeCodeTurnsCompareShared") private var sharedOnly = true
+
+    private var hosts: [String] { report.hosts.map(\.host).sorted() }
+
+    /// The two machines compared: the chosen ones while they have turns, otherwise this Mac
+    /// and the busiest other machine.
+    private var pair: (first: String, second: String) {
+        let busiest = report.hosts.map(\.host)
+        let first = busiest.contains(chosenFirst) ? chosenFirst
+            : busiest.contains(HostName.local) ? HostName.local : busiest.first ?? HostName.local
+        let others = busiest.filter { $0 != first }
+        return (first, others.contains(chosenSecond) ? chosenSecond : others.first ?? "")
+    }
+
+    private var steps: [StepComparison] {
+        let rows = report.comparison(of: pair.first, with: pair.second)
+        return sharedOnly && !pair.second.isEmpty ? rows.filter { $0.first != nil && $0.second != nil } : rows
+    }
 
     var body: some View {
         VSplitView {
@@ -298,25 +321,57 @@ private struct TurnCompareView: View {
             }
             .frame(minHeight: 90, idealHeight: 130, maxHeight: 240)
 
-            section("By step: how long each kind of step ran on each host (tool calls without their permission phase)") {
-                Table(report.activities) {
-                    TableColumn("Kind") { (s: ActivityStat) in
-                        HStack(spacing: 5) {
-                            Swatch(group: s.activity.group)
-                            Text(s.activity.label)
-                        }
-                    }
-                    .width(min: 90, ideal: 120)
-                    TableColumn("Step") { (s: ActivityStat) in Text(s.label).help(s.label) }.width(min: 140, ideal: 260)
-                    TableColumn("Host") { (s: ActivityStat) in Text(s.host) }.width(min: 60, ideal: 90)
-                    TableColumn("Calls") { (s: ActivityStat) in Text(s.count.formatted()) }.width(55)
-                    TableColumn("Total") { (s: ActivityStat) in Text(formatSpan(s.totalMs)) }.width(75)
-                    TableColumn("Median") { (s: ActivityStat) in Text(formatSpan(s.medianMs)) }.width(70)
-                    TableColumn("P90") { (s: ActivityStat) in Text(formatSpan(s.p90Ms)) }.width(70)
-                    TableColumn("Max") { (s: ActivityStat) in Text(formatSpan(s.maxMs)) }.width(70)
-                }
+            VStack(alignment: .leading, spacing: 0) {
+                stepControls
+                stepTable.font(.system(size: 11, design: .monospaced))
             }
             .frame(minHeight: 200)
+        }
+    }
+
+    private var stepControls: some View {
+        let pair = pair
+        return HStack(spacing: 6) {
+            Text("By step: the same kind of step on")
+            Picker("", selection: Binding(get: { pair.first }, set: { chosenFirst = $0 })) {
+                ForEach(hosts, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden().fixedSize()
+            Text("and")
+            Picker("", selection: Binding(get: { pair.second }, set: { chosenSecond = $0 })) {
+                ForEach(hosts.filter { $0 != pair.first }, id: \.self) { Text($0).tag($0) }
+                if pair.second.isEmpty { Text("no other host").tag("") }
+            }
+            .labelsHidden().fixedSize()
+            Toggle("Only steps both ran", isOn: $sharedOnly).padding(.leading, 8).disabled(pair.second.isEmpty)
+            Spacer()
+            Text("tool calls without their permission phase")
+        }
+        .font(.caption).foregroundColor(.secondary).controlSize(.small)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+    }
+
+    private var stepTable: some View {
+        let pair = pair
+        let other = pair.second.isEmpty ? "other" : pair.second
+        return Table(steps) {
+            TableColumn("Kind") { (s: StepComparison) in
+                HStack(spacing: 5) {
+                    Swatch(group: s.activity.group)
+                    Text(s.activity.label)
+                }
+            }
+            .width(min: 90, ideal: 120)
+            TableColumn("Step") { (s: StepComparison) in Text(s.label).help(s.label) }.width(min: 120, ideal: 220)
+            TableColumn("\(pair.first) calls") { (s: StepComparison) in calls(s.first) }.width(min: 60, ideal: 80)
+            TableColumn("\(pair.first) median") { (s: StepComparison) in median(s.first, against: s.second) }
+                .width(min: 70, ideal: 90)
+            TableColumn("\(pair.first) P90") { (s: StepComparison) in p90(s.first) }.width(min: 60, ideal: 80)
+            TableColumn("\(other) calls") { (s: StepComparison) in calls(s.second) }.width(min: 60, ideal: 80)
+            TableColumn("\(other) median") { (s: StepComparison) in median(s.second, against: s.first) }
+                .width(min: 70, ideal: 90)
+            TableColumn("\(other) P90") { (s: StepComparison) in p90(s.second) }.width(min: 60, ideal: 80)
+            TableColumn("Faster") { (s: StepComparison) in Text(difference(s, pair)) }.width(min: 110, ideal: 160)
         }
     }
 
@@ -325,6 +380,34 @@ private struct TurnCompareView: View {
             Text(title).font(.caption).foregroundColor(.secondary).padding(.horizontal, 8).padding(.vertical, 4)
             content().font(.system(size: 11, design: .monospaced))
         }
+    }
+
+    private func calls(_ stat: ActivityStat?) -> Text {
+        Text(stat.map { $0.count.formatted() } ?? "–").foregroundColor(stat == nil ? .secondary : .primary)
+    }
+
+    /// The median, bold on the machine where it is shorter.
+    private func median(_ stat: ActivityStat?, against other: ActivityStat?) -> some View {
+        let shorter = stat.flatMap { s in other.map { s.medianMs < $0.medianMs / TurnCompareView.sameWithin } } ?? false
+        return Text(stat.map { formatSpan($0.medianMs) } ?? "–")
+            .fontWeight(shorter ? .bold : .regular)
+            .foregroundColor(stat == nil ? .secondary : .primary)
+            .help(stat.map { "total \(formatSpan($0.totalMs)), longest \(formatSpan($0.maxMs))" } ?? "")
+    }
+
+    private func p90(_ stat: ActivityStat?) -> Text {
+        Text(stat.map { formatSpan($0.p90Ms) } ?? "–").foregroundColor(stat == nil ? .secondary : .primary)
+    }
+
+    /// Medians closer than this ratio read as the same.
+    private static let sameWithin = 1.05
+
+    /// Which machine's median is shorter, and by how many times.
+    private func difference(_ step: StepComparison, _ pair: (first: String, second: String)) -> String {
+        guard let ratio = step.ratio else { return "–" }
+        let times = max(ratio, 1 / ratio)
+        if times < Self.sameWithin { return "about the same" }
+        return "\(ratio > 1 ? pair.first : pair.second) \(String(format: times < 10 ? "%.1f" : "%.0f", times))× faster"
     }
 
     private func share(_ h: HostSummary, _ group: TimeGroup) -> Text {
