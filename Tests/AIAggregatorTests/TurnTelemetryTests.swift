@@ -133,6 +133,24 @@ struct TurnTelemetryTests {
         #expect(close(turn.time[.overhead], 1500))
     }
 
+    @Test func aQuestionsPermissionPhaseIsTheUsers() {
+        // The desktop app reports no source; a question tool's phase is still the user answering.
+        let spans: [[String: Any]] = [
+            Self.span("interaction", id: "I", parent: nil, 0, 100),
+            Self.span("tool", id: "Q", parent: "I", 1, 91, ["tool_name": "AskUserQuestion"]),
+            Self.span("tool.blocked_on_user", id: "QP", parent: "Q", 1, 90, ["decision": "unknown", "source": "unknown"]),
+            Self.span("tool", id: "B", parent: "I", 92, 99, ["tool_name": "Bash"]),
+            Self.span("tool.blocked_on_user", id: "BP", parent: "B", 92, 97, ["decision": "unknown", "source": "unknown"]),
+        ]
+        let turn = TurnBuilder.turns(from: TraceSpanParser.parse(Self.body(spans)))[0]
+
+        #expect(close(turn.time[.user], 90_000))
+        #expect(close(turn.time[.permission], 5000))
+        #expect(close(turn.time[.shell], 2000))
+        #expect(turn.steps[0].permissionByUser)
+        #expect(!turn.steps[1].permissionByUser)
+    }
+
     @Test func sortsShellCommandsByTheProgramTheyRun() {
         func kind(_ command: String) -> String {
             let c = ShellCommand.classify(command)

@@ -126,6 +126,17 @@ enum Activity: String, CaseIterable {
         }
     }
 
+    /// Tools that are a question to the user: their whole call, permission phase included,
+    /// lasts as long as the user takes to answer.
+    static let answeredByUser: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+
+    /// Whether a permission phase was the user deciding. Claude Code names who decided only
+    /// in terminal sessions; under the desktop app the source is "unknown", and only a
+    /// question tool's phase is known to be the user's.
+    static func permissionIsUsers(_ phase: TraceSpan, tool: String?) -> Bool {
+        phase.attributes["source"]?.hasPrefix("user") == true || tool.map(answeredByUser.contains) == true
+    }
+
     /// Activity and comparison label for a tool call: the tool's name, or for a shell tool
     /// the program its command runs ("swift build") when Claude Code sent the command.
     static func of(tool: String, command: String?) -> (activity: Activity, label: String) {
@@ -137,8 +148,7 @@ enum Activity: String, CaseIterable {
         case "Read", "Edit", "Write", "MultiEdit", "NotebookEdit": return (.file, tool)
         case "WebFetch", "WebSearch": return (.web, tool)
         case "Agent", "Task": return (.agent, tool)
-        // These tools run for as long as the user takes to answer.
-        case "AskUserQuestion", "ExitPlanMode": return (.user, tool)
+        case _ where answeredByUser.contains(tool): return (.user, tool)
         default:
             if tool.hasPrefix("mcp__") {
                 let parts = tool.components(separatedBy: "__")
@@ -404,7 +414,7 @@ enum TurnBuilder {
                 s.executionMs = execution?.durationMs
                 if let wait = own.first(where: { $0.kind == .permission }) {
                     s.permission = DateInterval(start: wait.start, end: wait.end)
-                    s.permissionByUser = wait.attributes["source"]?.hasPrefix("user") == true
+                    s.permissionByUser = Activity.permissionIsUsers(wait, tool: name)
                 }
                 step = s
             case .hook:
@@ -413,7 +423,7 @@ enum TurnBuilder {
                                 start: span.start, end: span.end, durationMs: span.durationMs, depth: depth,
                                 success: (a["num_blocking"].flatMap(Int.init) ?? 0) == 0)
             case .permission:
-                let byUser = a["source"]?.hasPrefix("user") == true
+                let byUser = Activity.permissionIsUsers(span, tool: ancestors.first?.attributes["tool_name"])
                 claims.append(Claim(span: span, activity: byUser ? .user : .permission, depth: ancestors.count))
             case .execution, .interaction:
                 break
