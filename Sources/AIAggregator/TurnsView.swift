@@ -384,8 +384,10 @@ extension TimeGroup {
         switch self {
         case .model: return "Waiting on an API request, a subagent's included"
         case .tools: return "A tool running on the machine: builds, tests, searches, git, file reads and edits"
-        case .permission: return "Deciding whether a tool may run: rules, hooks and the auto-mode classifier"
-        case .user: return "A permission prompt or question waiting for your answer"
+        case .permission:
+            return "Deciding whether a tool may run: rules, hooks and the auto-mode classifier. Under the desktop app "
+                + "Claude Code doesn't say who decided, so a permission prompt you answered counts here too"
+        case .user: return "A question or plan waiting for your answer, and in terminal sessions a permission prompt"
         case .hooks: return "Your configured hooks running"
         case .overhead: return "The rest of the turn: Claude Code's own work between steps"
         }
