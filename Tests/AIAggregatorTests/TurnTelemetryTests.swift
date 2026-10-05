@@ -220,6 +220,92 @@ struct TurnTelemetryTests {
         #expect(db.turnCount() == 0)
     }
 
+    /// A turn still going: a finished request and build, a tool call past its permission
+    /// check, and a subagent that has made one request. Its interaction span hasn't come.
+    private static let unfinished: [[String: Any]] = [
+        span("llm_request", id: "L1", parent: "R", 0.5, 3.5, trace: "live", ["model": "claude-opus-5-5"]),
+        span("tool", id: "T1", parent: "R", 3.6, 9.6, trace: "live", ["tool_name": "Bash", "full_command": "swift build"]),
+        span("tool.blocked_on_user", id: "P1", parent: "T1", 3.6, 3.7, trace: "live", ["source": "config"]),
+        span("tool.execution", id: "E1", parent: "T1", 3.7, 9.6, trace: "live", ["success": true]),
+        span("tool.blocked_on_user", id: "P2", parent: "T2", 10, 10.1, trace: "live", ["source": "config"]),
+        span("llm_request", id: "AL", parent: "A", 11, 12, trace: "live", ["model": "claude-haiku-4-5"]),
+        // A background request outside any turn.
+        span("llm_request", id: "S", parent: nil, 5, 6, trace: "stray", ["model": "claude-haiku-4-5"]),
+    ]
+
+    @Test func showsATurnThatIsStillRunning() {
+        let spans = TraceSpanParser.parse(Self.body(Self.unfinished))
+        let now = Date(timeIntervalSince1970: Self.t0 + 30)
+
+        // Without the time it is, only finished turns are built.
+        #expect(TurnBuilder.turns(from: spans).isEmpty)
+
+        let turns = TurnBuilder.turns(from: spans, now: now)
+        #expect(turns.count == 1)
+        let turn = turns[0]
+        // It goes by the id its interaction span will have, so it stays selected when it ends.
+        #expect(turn.id == "R")
+        #expect(turn.running)
+        #expect(turn.sessionId == "session1")
+        #expect(close(turn.start.timeIntervalSince1970 - Self.t0, 0.5))
+        // Its end is the last moment Claude Code has reported on.
+        #expect(abs(turn.end.timeIntervalSince1970 - Self.t0 - 12) < 0.01)
+        #expect(turn.steps.map(\.id) == ["L1", "T1", "T2", "A", "AL"])
+        #expect(turn.steps.map(\.running) == [false, false, true, true, false])
+        #expect(turn.steps.map(\.depth) == [0, 0, 0, 0, 1])
+        #expect(turn.steps[3].title == "Agent")
+        #expect(close(turn.steps[2].permission.map { $0.duration * 1000 }, 100))
+        #expect(close(turn.time[.model], 4000))
+        #expect(close(turn.time[.build], 5900))
+        #expect(close(turn.time.values.reduce(0, +), 11_500))
+
+        // Hours without a step, and it's taken for abandoned.
+        let muchLater = now.addingTimeInterval(TurnBuilder.runningWindow)
+        #expect(TurnBuilder.turns(from: spans, now: muchLater).isEmpty)
+
+        // Its interaction span arrives: the same turn, finished, with only what Claude Code sent.
+        let done = spans + TraceSpanParser.parse(Self.body([
+            Self.span("tool", id: "T2", parent: "R", 10, 14, trace: "live", ["tool_name": "Bash"]),
+            Self.span("tool", id: "A", parent: "R", 10.5, 15, trace: "live", ["tool_name": "Agent"]),
+            Self.span("interaction", id: "R", parent: nil, 0, 16, trace: "live"),
+        ]))
+        let finished = TurnBuilder.turns(from: done, now: now)
+        #expect(finished.map(\.id) == ["R"])
+        #expect(!finished[0].running)
+        #expect(finished[0].wallMs == 16_000)
+        #expect(finished[0].steps.map(\.id) == ["L1", "T1", "T2", "A", "AL"])
+        #expect(finished[0].steps.allSatisfy { !$0.running })
+    }
+
+    @Test func loadsRunningTurnsFromTheDatabase() {
+        let log = RequestLog(directory: nil)
+        log.record(spans: TraceSpanParser.parse(Self.body(Self.turn + Self.unfinished)))
+        let db = log.database
+
+        #expect(db.turnCount() == 1)
+        let recent = db.unfinishedSpans(since: Date(timeIntervalSince1970: Self.t0 + 11))
+        #expect(Set(recent.map(\.id)) == ["L1", "T1", "P1", "E1", "P2", "AL"])
+        #expect(db.unfinishedSpans(since: Date(timeIntervalSince1970: Self.t0 + 13)).isEmpty)
+
+        let spans = db.turnSpans(from: nil, to: nil, limit: 10) + recent
+        let turns = TurnBuilder.turns(from: spans, now: Date(timeIntervalSince1970: Self.t0 + 30))
+        #expect(turns.map(\.id) == ["R", "I"])
+        #expect(turns.map(\.running) == [true, false])
+    }
+
+    @Test func findsATurnByWhatItRan() {
+        let turn = TurnBuilder.turns(from: TraceSpanParser.parse(Self.body(Self.turn)))[0]
+        #expect(turn.matches(""))
+        #expect(turn.matches("  "))
+        #expect(turn.matches("SHIP"))
+        #expect(turn.matches("git push"))
+        #expect(turn.matches("swift build"))
+        #expect(turn.matches("opus"))
+        #expect(turn.matches("session1"))
+        #expect(turn.matches("Read"))
+        #expect(!turn.matches("cargo"))
+    }
+
     @Test func comparesHosts() {
         func turn(_ n: Int, host: String?, build: Double) -> [TraceSpan] {
             let spans: [[String: Any]] = [

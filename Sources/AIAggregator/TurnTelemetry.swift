@@ -325,6 +325,9 @@ struct TurnStep: Identifiable, Equatable {
     var permissionByUser = false
     /// A tool call's running time alone, when Claude Code reported it.
     var executionMs: Double? = nil
+    /// Still going: Claude Code has reported steps inside it but not the step itself, so
+    /// its `end` is only the last moment reported on.
+    var running = false
     var attributes: [String: String] = [:]
 
     /// Time spent doing the work: a tool call without its permission phase.
@@ -346,6 +349,8 @@ struct Turn: Identifiable, Equatable {
     /// Wall time by what the turn was waiting on at each moment, in milliseconds. Sums to
     /// the span's own length; time no step covers is Claude Code's own work.
     var time: [Activity: Double] = [:]
+    /// Still going: its steps so far, `end` being the last moment Claude Code has reported on.
+    var running = false
 
     func ms(_ group: TimeGroup) -> Double {
         time.reduce(0) { $1.key.group == group ? $0 + $1.value : $0 }
@@ -353,12 +358,29 @@ struct Turn: Identifiable, Equatable {
 
     var requestCount: Int { steps.filter { $0.activity.group == .model }.count }
     var toolCount: Int { steps.filter { $0.activity.group == .tools || $0.activity == .user }.count }
+
+    /// Whether the text appears in the turn's prompt, session, host or any step's name or command.
+    func matches(_ query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return true }
+        var fields: [String?] = [prompt, sessionId, HostName.label(host)]
+        for step in steps { fields += [step.title, step.detail, step.label] }
+        return fields.contains { $0?.localizedCaseInsensitiveContains(query) == true }
+    }
 }
 
 enum TurnBuilder {
+    /// How long after its last reported step a turn without an end still counts as running.
+    /// Claude Code sends nothing while a long tool call or a question is pending.
+    static let runningWindow: TimeInterval = 2 * 3600
+
     /// Builds turns from spans, newest first. Spans may come in any order and from several
-    /// traces; one whose turn isn't among them is left out.
-    static func turns(from spans: [TraceSpan]) -> [Turn] {
+    /// traces; one whose turn isn't among them is left out, unless `now` is given: then the
+    /// steps of a turn that hasn't ended make a running turn.
+    static func turns(from spans: [TraceSpan], now: Date? = nil) -> [Turn] {
+        let pending = now.map { unfinished(in: spans, now: $0) } ?? []
+        let open = Set(pending.map(\.id))
+        let spans = spans + pending
         let byId = Dictionary(spans.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let interactions = spans.filter { $0.kind == .interaction }
         var members: [String: [(span: TraceSpan, ancestors: [TraceSpan])]] = [:]
@@ -379,14 +401,51 @@ enum TurnBuilder {
             if let turnId { members[turnId, default: []].append((span, ancestors)) }
         }
 
-        return interactions.map { turn(from: $0, members: members[$0.id] ?? []) }
+        return interactions.map { turn(from: $0, members: members[$0.id] ?? [], open: open) }
             .sorted { $0.start > $1.start }
     }
 
-    private static func turn(from root: TraceSpan, members: [(span: TraceSpan, ancestors: [TraceSpan])]) -> Turn {
+    /// Stand-ins for the spans still open. A span is exported when it ends, so a running
+    /// turn is a trace with steps but no interaction span, and each parent its steps name
+    /// that hasn't arrived is a turn, tool call or subagent in progress. A stand-in starts
+    /// at the first step inside it and ends at the trace's last reported moment.
+    private static func unfinished(in spans: [TraceSpan], now: Date) -> [TraceSpan] {
+        let known = Set(spans.map(\.id))
+        let finished = Set(spans.filter { $0.kind == .interaction }.map(\.traceId))
+        var out: [TraceSpan] = []
+        for (trace, members) in Dictionary(grouping: spans.filter { !finished.contains($0.traceId) }, by: \.traceId) {
+            let waiting = members.filter { $0.parentId.map { !known.contains($0) } ?? false }.sorted { $0.start < $1.start }
+            // A turn opens with a step of its own, so the earliest one names the turn.
+            guard let first = waiting.first(where: { $0.kind != .permission && $0.kind != .execution }),
+                  let rootId = first.parentId, let last = members.map(\.end).max(),
+                  now.timeIntervalSince(last) < runningWindow else { continue }
+            var root = TraceSpan(id: rootId, traceId: trace, parentId: nil, kind: .interaction,
+                                 start: members.map(\.start).min() ?? first.start, end: last)
+            root.sessionId = first.sessionId
+            root.host = first.host
+            out.append(root)
+
+            for (parent, inside) in Dictionary(grouping: waiting, by: { $0.parentId ?? rootId }) where parent != rootId {
+                var call = TraceSpan(id: parent, traceId: trace, parentId: rootId, kind: .tool,
+                                     start: inside[0].start, end: last)
+                call.sessionId = first.sessionId
+                call.host = first.host
+                // Only a subagent runs steps of its own; a tool call has just its two phases.
+                if inside.contains(where: { $0.kind != .permission && $0.kind != .execution }) {
+                    call.attributes["tool_name"] = "Agent"
+                }
+                out.append(call)
+            }
+        }
+        return out
+    }
+
+    private static func turn(from root: TraceSpan, members: [(span: TraceSpan, ancestors: [TraceSpan])],
+                             open: Set<String> = []) -> Turn {
         let prompt = root.attributes["user_prompt"].flatMap { $0 == "<REDACTED>" || $0.isEmpty ? nil : $0 }
         var turn = Turn(id: root.id, start: root.start, end: root.end, wallMs: root.durationMs,
                         host: root.host, sessionId: root.sessionId, prompt: prompt)
+        turn.running = open.contains(root.id)
 
         let children = Dictionary(grouping: members.filter { $0.span.parentId != nil }, by: { $0.span.parentId! })
         var claims: [Claim] = []
@@ -430,6 +489,7 @@ enum TurnBuilder {
             }
             if var step {
                 step.attributes = a
+                step.running = open.contains(span.id)
                 turn.steps.append(step)
                 claims.append(Claim(span: span, activity: step.activity, depth: ancestors.count))
             }

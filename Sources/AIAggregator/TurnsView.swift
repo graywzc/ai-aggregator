@@ -2,12 +2,14 @@ import AppKit
 import SwiftUI
 
 /// The Turns tab of the requests window: each prompt end to end, as the rounds of model requests and tool calls
-/// Claude Code made to answer it, and how that time compares between machines.
+/// Claude Code made to answer it, and how that time compares between machines. A turn still running is
+/// listed too, its steps added as Claude Code reports them.
 struct TurnsView: View {
     @ObservedObject var log: RequestLog
     @AppStorage("ClaudeCodeTurnsTab") private var tab: Tab = .turns
     @AppStorage("ClaudeCodeTurnsPeriod") private var period: StatsPeriod = .today
     @State private var host = TurnsView.allHosts
+    @State private var search = ""
     @State private var loaded: [Turn]?
 
     enum Tab: String { case turns, compare }
@@ -18,8 +20,7 @@ struct TurnsView: View {
 
     private var hosts: [String] { Set((loaded ?? []).map { HostName.label($0.host) }).sorted() }
     private var turns: [Turn] {
-        let all = loaded ?? []
-        return host == Self.allHosts ? all : all.filter { HostName.label($0.host) == host }
+        (loaded ?? []).filter { (host == Self.allHosts || HostName.label($0.host) == host) && $0.matches(search) }
     }
 
     var body: some View {
@@ -30,7 +31,8 @@ struct TurnsView: View {
             } else {
                 switch tab {
                 case .turns: TurnListView(turns: turns)
-                case .compare: TurnCompareView(report: TurnReport.build(from: loaded ?? []))
+                // A running turn's steps so far would skew the medians.
+                case .compare: TurnCompareView(report: TurnReport.build(from: (loaded ?? []).filter { !$0.running }))
                 }
             }
         }
@@ -39,7 +41,12 @@ struct TurnsView: View {
             let range = period.range()
             let limit = Self.maxTurns
             loaded = await Task.detached {
-                TurnBuilder.turns(from: database.turnSpans(from: range.from, to: range.to, limit: limit))
+                var spans = database.turnSpans(from: range.from, to: range.to, limit: limit)
+                // Only a period reaching to now has turns still running.
+                guard range.to == nil else { return TurnBuilder.turns(from: spans) }
+                let now = Date()
+                spans += database.unfinishedSpans(since: now.addingTimeInterval(-TurnBuilder.runningWindow))
+                return TurnBuilder.turns(from: spans, now: now)
             }.value
             if host != Self.allHosts, !hosts.contains(host) { host = Self.allHosts }
         }
@@ -64,6 +71,9 @@ struct TurnsView: View {
                         ForEach(hosts, id: \.self) { Text($0).tag($0) }
                     }
                     .frame(width: 170)
+                    TextField("Find by command, tool or session", text: $search)
+                        .textFieldStyle(.roundedBorder).frame(minWidth: 140, maxWidth: 260)
+                        .help("Shows the turns whose prompt, session, host, or a step's tool, model or command has this text")
                 }
                 Spacer()
                 if (loaded ?? []).count >= Self.maxTurns {
@@ -79,7 +89,7 @@ struct TurnsView: View {
         VStack(spacing: 8) {
             Text("No turns in this period").font(.headline)
             Text("""
-                A turn shows up when it finishes. Turns come from Claude Code's trace export: \
+                A turn shows up once its first step finishes. Turns come from Claude Code's trace export: \
                 OTEL_TRACES_EXPORTER=otlp and CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1, in a session \
                 started after this version was installed. See the README.
                 """)
@@ -111,8 +121,10 @@ private struct TurnListView: View {
 
     private var summary: some View {
         let wall = turns.reduce(0.0) { $0 + $1.time.values.reduce(0, +) }
+        let running = turns.filter(\.running).count
         return HStack(spacing: 16) {
             Text("\(turns.count) turns")
+            if running > 0 { Text("\(running) running").foregroundColor(.green) }
             Text("\(formatSpan(wall)) end to end")
             ForEach(TimeGroup.allCases) { group in
                 let ms = turns.reduce(0.0) { $0 + $1.ms(group) }
@@ -128,17 +140,26 @@ private struct TurnListView: View {
         Table(turns, selection: $selection) {
             Group {
                 TableColumn("Started") { (t: Turn) in
-                    Text(t.start.formatted(.dateTime.month().day().hour().minute().second()))
+                    HStack(spacing: 4) {
+                        Text(t.start.formatted(.dateTime.month().day().hour().minute().second()))
+                        if t.running { Circle().fill(Color.green).frame(width: 6, height: 6).help("Still running") }
+                    }
                 }
-                .width(140)
+                .width(150)
                 TableColumn("Host") { (t: Turn) in Text(HostName.label(t.host)) }.width(min: 50, ideal: 70)
+                TableColumn("Session") { (t: Turn) in Text(t.sessionId.map { String($0.prefix(8)) } ?? "–") }.width(70)
                 TableColumn("Prompt") { (t: Turn) in
                     Text(t.prompt?.replacingOccurrences(of: "\n", with: " ") ?? "–")
                         .foregroundColor(t.prompt == nil ? .secondary : .primary)
                         .help(t.prompt ?? "Set OTEL_LOG_USER_PROMPTS=1 to record prompt text")
                 }
                 .width(min: 120, ideal: 220)
-                TableColumn("End to end") { (t: Turn) in Text(formatSpan(t.wallMs)) }.width(80)
+                TableColumn("End to end") { (t: Turn) in
+                    Ticking(active: t.running) { now in
+                        Text(formatSpan(t.wallMs(at: now))).foregroundColor(t.running ? .green : .primary)
+                    }
+                }
+                .width(80)
             }
             Group {
                 TableColumn("Model") { (t: Turn) in ms(t.ms(.model)) }.width(60)
@@ -164,20 +185,37 @@ private struct TurnListView: View {
 }
 
 /// The selected turn as a waterfall: one row per model request, tool call and hook, placed
-/// on the turn's own time axis.
+/// on the turn's own time axis. A running turn's axis reaches to now, and its newest step
+/// is kept in view.
 private struct TurnTimeline: View {
     let turn: Turn?
 
+    private static let pendingId = "pending"
+
     var body: some View {
         if let turn {
-            VStack(alignment: .leading, spacing: 0) {
-                heading(turn)
-                Divider()
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(turn.steps) { step in
-                            StepRow(step: step, turn: turn)
-                            Divider().opacity(0.4)
+            Ticking(active: turn.running) { now in
+                VStack(alignment: .leading, spacing: 0) {
+                    heading(turn, now: now)
+                    Divider()
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(turn.steps) { step in
+                                    StepRow(step: step, turn: turn, now: now)
+                                    Divider().opacity(0.4)
+                                }
+                                // Between steps nothing says what is going on until it ends.
+                                if turn.running, !turn.steps.contains(where: \.running) {
+                                    StepRow(step: Self.pending(after: turn), turn: turn, now: now, unreported: true)
+                                        .id(Self.pendingId)
+                                }
+                            }
+                        }
+                        .onChange(of: turn.steps.count) { _ in
+                            guard turn.running else { return }
+                            proxy.scrollTo(turn.steps.contains(where: \.running) ? turn.steps.last?.id : Self.pendingId,
+                                           anchor: .bottom)
                         }
                     }
                 }
@@ -189,13 +227,26 @@ private struct TurnTimeline: View {
         }
     }
 
-    private func heading(_ turn: Turn) -> some View {
+    /// The stretch since the last reported step.
+    private static func pending(after turn: Turn) -> TurnStep {
+        var step = TurnStep(id: pendingId, activity: .overhead, title: "next step",
+                            detail: "Claude Code reports a step when it ends", label: "", start: turn.end, end: turn.end,
+                            durationMs: 0, depth: 0, success: true)
+        step.running = true
+        return step
+    }
+
+    private func heading(_ turn: Turn, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let prompt = turn.prompt {
                 Text(prompt.replacingOccurrences(of: "\n", with: " ")).lineLimit(2).textSelection(.enabled)
             }
             HStack(spacing: 14) {
-                Text("\(formatSpan(turn.wallMs)) end to end")
+                if turn.running {
+                    Text("running, \(formatSpan(turn.wallMs(at: now))) so far").foregroundColor(.green)
+                } else {
+                    Text("\(formatSpan(turn.wallMs)) end to end")
+                }
                 ForEach(TimeGroup.allCases) { group in
                     let ms = turn.ms(group)
                     if ms >= 1 {
@@ -217,29 +268,39 @@ private struct TurnTimeline: View {
 private struct StepRow: View {
     let step: TurnStep
     let turn: Turn
+    /// The time it is, which is where a running turn and its running steps end.
+    let now: Date
+    /// The row is the wait for a step Claude Code hasn't reported yet.
+    var unreported = false
 
-    private var span: Double { max(turn.end.timeIntervalSince(turn.start), 0.001) }
+    private var span: Double { max(turn.end(at: now).timeIntervalSince(turn.start), 0.001) }
+    private var end: Date { step.running ? turn.end(at: now) : step.end }
+    private var durationMs: Double { step.running ? end.timeIntervalSince(step.start) * 1000 : step.durationMs }
 
     var body: some View {
         HStack(spacing: 8) {
             Text("+" + formatSpan(step.start.timeIntervalSince(turn.start) * 1000))
                 .foregroundColor(.secondary).frame(width: 64, alignment: .trailing)
             HStack(spacing: 5) {
-                Swatch(group: step.activity.group)
-                Text(step.title).lineLimit(1)
+                Swatch(group: step.activity.group).opacity(unreported ? 0 : 1)
+                Text(step.title).lineLimit(1).foregroundColor(unreported ? .secondary : .primary)
                 if !step.success { Text("failed").foregroundColor(.orange) }
+                if step.running, !unreported { Text("running").foregroundColor(.green) }
             }
             .padding(.leading, CGFloat(step.depth) * 12)
             .frame(width: 190, alignment: .leading)
-            Text(step.activity.label).lineLimit(1).foregroundColor(.secondary).frame(width: 120, alignment: .leading)
+            Text(unreported ? "In progress" : step.activity.label)
+                .lineLimit(1).foregroundColor(.secondary).frame(width: 120, alignment: .leading)
             Text(step.detail?.replacingOccurrences(of: "\n", with: " ") ?? "")
                 .lineLimit(1).truncationMode(.tail).foregroundColor(.secondary)
                 .frame(minWidth: 80, maxWidth: .infinity, alignment: .leading)
-            Text(formatSpan(step.durationMs)).frame(width: 60, alignment: .trailing)
+            Text(formatSpan(durationMs)).foregroundColor(step.running ? .green : .primary)
+                .frame(width: 60, alignment: .trailing)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Rectangle().fill(Color.primary.opacity(0.05))
-                    bar(from: step.start, to: step.end, group: step.activity.group, width: geo.size.width)
+                    bar(from: step.start, to: end, group: step.activity.group, width: geo.size.width)
+                        .opacity(unreported ? 0.4 : 1)
                     if let wait = step.permission {
                         bar(from: wait.start, to: wait.end, group: step.permissionByUser ? .user : .permission,
                             width: geo.size.width)
@@ -261,7 +322,7 @@ private struct StepRow: View {
     }
 
     private var tooltip: String {
-        var lines = ["\(step.title): \(formatSpan(step.durationMs))"]
+        var lines = ["\(step.title): \(formatSpan(durationMs))\(step.running ? " so far" : "")"]
         if let wait = step.permission {
             lines.append("\(step.permissionByUser ? "waiting on you" : "permission check") \(formatSpan(wait.duration * 1000))")
         }
@@ -417,6 +478,27 @@ private struct TurnCompareView: View {
 }
 
 // MARK: - Shared pieces
+
+/// Draws its content once a second while `active`, handing it the time it is.
+private struct Ticking<Content: View>: View {
+    let active: Bool
+    @ViewBuilder let content: (Date) -> Content
+
+    var body: some View {
+        if active {
+            TimelineView(.periodic(from: .now, by: 1)) { content($0.date) }
+        } else {
+            content(Date())
+        }
+    }
+}
+
+private extension Turn {
+    /// Where the turn ends: now while it runs. Another machine's clock can be ahead of this one.
+    func end(at now: Date) -> Date { running ? max(now, end) : end }
+
+    func wallMs(at now: Date) -> Double { running ? end(at: now).timeIntervalSince(start) * 1000 : wallMs }
+}
 
 /// One bar split by what the time went on.
 private struct TimeSplitBar: View {
