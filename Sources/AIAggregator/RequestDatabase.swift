@@ -134,6 +134,18 @@ final class RequestDatabase: @unchecked Sendable {
         }
     }
 
+    /// Every span of the traces that have no interaction span yet and a step that ended at
+    /// or after `since`: the turns still running.
+    func unfinishedSpans(since: Date) -> [TraceSpan] {
+        let sql = """
+            SELECT \(Self.spanColumns) FROM spans
+            WHERE trace_id IN (SELECT trace_id FROM spans WHERE end >= ? AND parent_id IS NOT NULL)
+              AND trace_id NOT IN (SELECT trace_id FROM spans WHERE kind = 'interaction')
+            ORDER BY start
+            """
+        return queue.sync { query(sql, [since.timeIntervalSince1970], Self.span) }
+    }
+
     func turnCount() -> Int {
         queue.sync {
             query("SELECT COUNT(*) FROM spans WHERE kind = 'interaction'", []) { Int(sqlite3_column_int64($0, 0)) }.first ?? 0
@@ -276,6 +288,7 @@ final class RequestDatabase: @unchecked Sendable {
         );
         CREATE INDEX IF NOT EXISTS spans_kind_start ON spans(kind, start);
         CREATE INDEX IF NOT EXISTS spans_trace ON spans(trace_id);
+        CREATE INDEX IF NOT EXISTS spans_end ON spans(end);
         """
 
     private static let columns = """
