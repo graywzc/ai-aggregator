@@ -100,6 +100,7 @@ final class RequestDatabase: @unchecked Sendable {
             run("DELETE FROM requests", [])
             run("DELETE FROM prompts", [])
             run("DELETE FROM spans", [])
+            run("DELETE FROM span_outputs", [])
         }
     }
 
@@ -113,6 +114,9 @@ final class RequestDatabase: @unchecked Sendable {
                 run("INSERT OR REPLACE INTO spans (\(Self.spanColumns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [s.id, s.traceId, s.parentId, s.kind.rawValue, s.start.timeIntervalSince1970,
                      s.end.timeIntervalSince1970, s.sessionId, s.host, Self.encodeAttributes(s.attributes)])
+                if let output = s.output {
+                    run("INSERT OR REPLACE INTO span_outputs (span_id, output) VALUES (?, ?)", [s.id, output])
+                }
             }
             exec("COMMIT")
         }
@@ -144,6 +148,11 @@ final class RequestDatabase: @unchecked Sendable {
             ORDER BY start
             """
         return queue.sync { query(sql, [since.timeIntervalSince1970], Self.span) }
+    }
+
+    /// What a tool call returned, when Claude Code sent it. Spans are loaded without it.
+    func output(ofSpan id: String) -> String? {
+        queue.sync { query("SELECT output FROM span_outputs WHERE span_id = ?", [id]) { Self.text($0, 0) }.first ?? nil }
     }
 
     func turnCount() -> Int {
@@ -289,6 +298,10 @@ final class RequestDatabase: @unchecked Sendable {
         CREATE INDEX IF NOT EXISTS spans_kind_start ON spans(kind, start);
         CREATE INDEX IF NOT EXISTS spans_trace ON spans(trace_id);
         CREATE INDEX IF NOT EXISTS spans_end ON spans(end);
+        CREATE TABLE IF NOT EXISTS span_outputs (
+            span_id TEXT PRIMARY KEY,
+            output TEXT NOT NULL
+        );
         """
 
     private static let columns = """

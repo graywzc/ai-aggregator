@@ -30,7 +30,7 @@ struct TurnsView: View {
                 emptyState
             } else {
                 switch tab {
-                case .turns: TurnListView(turns: turns)
+                case .turns: TurnListView(turns: turns, database: log.database)
                 // A running turn's steps so far would skew the medians.
                 case .compare: TurnCompareView(report: TurnReport.build(from: (loaded ?? []).filter { !$0.running }))
                 }
@@ -103,6 +103,7 @@ struct TurnsView: View {
 
 private struct TurnListView: View {
     let turns: [Turn]
+    let database: RequestDatabase
     @State private var selection: Turn.ID?
 
     private var selected: Turn? { turns.first { $0.id == selection } ?? turns.first }
@@ -114,7 +115,7 @@ private struct TurnListView: View {
                 table
             }
             .frame(minHeight: 180, idealHeight: 280)
-            TurnTimeline(turn: selected)
+            TurnTimeline(turn: selected, database: database)
                 .frame(minHeight: 160, idealHeight: 340)
         }
     }
@@ -186,9 +187,11 @@ private struct TurnListView: View {
 
 /// The selected turn as a waterfall: one row per model request, tool call and hook, placed
 /// on the turn's own time axis. A running turn's axis reaches to now, and its newest step
-/// is kept in view.
+/// is kept in view. Clicking a row opens everything reported about that step beside it.
 private struct TurnTimeline: View {
     let turn: Turn?
+    let database: RequestDatabase
+    @State private var selection: TurnStep.ID?
 
     private static let pendingId = "pending"
 
@@ -198,24 +201,11 @@ private struct TurnTimeline: View {
                 VStack(alignment: .leading, spacing: 0) {
                     heading(turn, now: now)
                     Divider()
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                ForEach(turn.steps) { step in
-                                    StepRow(step: step, turn: turn, now: now)
-                                    Divider().opacity(0.4)
-                                }
-                                // Between steps nothing says what is going on until it ends.
-                                if turn.running, !turn.steps.contains(where: \.running) {
-                                    StepRow(step: Self.pending(after: turn), turn: turn, now: now, unreported: true)
-                                        .id(Self.pendingId)
-                                }
-                            }
-                        }
-                        .onChange(of: turn.steps.count) { _ in
-                            guard turn.running else { return }
-                            proxy.scrollTo(turn.steps.contains(where: \.running) ? turn.steps.last?.id : Self.pendingId,
-                                           anchor: .bottom)
+                    HSplitView {
+                        steps(turn, now: now).frame(minWidth: 420)
+                        if let step = turn.steps.first(where: { $0.id == selection }) {
+                            StepDetail(step: step, turn: turn, now: now, database: database) { selection = nil }
+                                .frame(minWidth: 300, idealWidth: 520)
                         }
                     }
                 }
@@ -224,6 +214,32 @@ private struct TurnTimeline: View {
             Text("Select a turn to see its model requests and tool calls in order.")
                 .font(.caption).foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func steps(_ turn: Turn, now: Date) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(turn.steps) { step in
+                        StepRow(step: step, turn: turn, now: now)
+                            .background(step.id == selection ? Color.accentColor.opacity(0.18) : Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selection = step.id == selection ? nil : step.id }
+                        Divider().opacity(0.4)
+                    }
+                    // Between steps nothing says what is going on until it ends.
+                    if turn.running, !turn.steps.contains(where: \.running) {
+                        StepRow(step: Self.pending(after: turn), turn: turn, now: now, unreported: true)
+                            .id(Self.pendingId)
+                    }
+                }
+            }
+            .onChange(of: turn.steps.count) { _ in
+                guard turn.running else { return }
+                proxy.scrollTo(turn.steps.contains(where: \.running) ? turn.steps.last?.id : Self.pendingId,
+                               anchor: .bottom)
+            }
         }
     }
 
@@ -328,9 +344,118 @@ private struct StepRow: View {
         }
         if let run = step.executionMs { lines.append("running \(formatSpan(run))") }
         if let detail = step.detail { lines.append(detail) }
-        let skip: Set<String> = ["full_command", "span.type", "terminal.type", "tool_name", "duration_ms"]
-        lines += step.attributes.filter { !skip.contains($0.key) }.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }
+        lines += step.reported.map { "\($0.key): \($0.value)" }
+        if !unreported { lines.append("Click for the whole step") }
         return lines.joined(separator: "\n")
+    }
+}
+
+private extension TurnStep {
+    /// The attributes Claude Code sent that the row doesn't already show, by name.
+    var reported: [(key: String, value: String)] {
+        let skip: Set<String> = ["full_command", "span.type", "terminal.type", "tool_name", "duration_ms"]
+        return attributes.filter { !skip.contains($0.key) }.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    }
+
+    var isToolCall: Bool { activity.group == .tools || activity == .user }
+}
+
+/// Everything Claude Code reported about one step: when it ran and for how long, its whole
+/// command, and what it returned when Claude Code sends that (`OTEL_LOG_TOOL_CONTENT=1`).
+private struct StepDetail: View {
+    let step: TurnStep
+    let turn: Turn
+    let now: Date
+    let database: RequestDatabase
+    let close: () -> Void
+    @State private var output: String?
+
+    private var hasOutput: Bool { step.attributes["output_length"] != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Swatch(group: step.activity.group)
+                Text(step.title).fontWeight(.semibold).lineLimit(1)
+                Text(step.activity.label).foregroundColor(.secondary).lineLimit(1)
+                if !step.success { Text("failed").foregroundColor(.orange) }
+                if step.running { Text("running").foregroundColor(.green) }
+                Spacer()
+                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.borderless).help("Close")
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    section("Time") { Text(times.joined(separator: "\n")) }
+                    if let detail = step.detail {
+                        section(step.attributes["full_command"] == nil ? "Detail" : "Command") { Text(detail) }
+                    }
+                    if step.isToolCall {
+                        section("Output") {
+                            if let output { Text(output) }
+                            if let note = outputNote { Text(note).foregroundColor(.secondary) }
+                        }
+                    }
+                    if !step.reported.isEmpty {
+                        section("Reported by Claude Code") {
+                            Text(step.reported.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
+                        }
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .font(.system(size: 11, design: .monospaced))
+        // A running step's output comes with its end, under the same id.
+        .task(id: "\(step.id)#\(step.attributes["output_length"] ?? "")") {
+            let database = database
+            let id = step.id
+            output = hasOutput ? await Task.detached { database.output(ofSpan: id) }.value : nil
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
+            content()
+        }
+    }
+
+    private var times: [String] {
+        let offset = formatSpan(step.start.timeIntervalSince(turn.start) * 1000)
+        var lines = ["started \(step.start.formatted(.dateTime.hour().minute().second())), \(offset) into the turn"]
+        if step.running {
+            let soFar = turn.end(at: now).timeIntervalSince(step.start) * 1000
+            lines.append("running for \(formatSpan(soFar))")
+        } else {
+            lines.append("took \(formatSpan(step.durationMs))")
+        }
+        if let wait = step.permission {
+            lines.append("\(step.permissionByUser ? "waiting on you" : "permission check") \(formatSpan(wait.duration * 1000))")
+        }
+        if let run = step.executionMs { lines.append("ran for \(formatSpan(run))") }
+        return lines
+    }
+
+    /// What to say about the output besides showing it: that it was cut, or why there is none.
+    private var outputNote: String? {
+        if step.running {
+            return "Claude Code reports a tool call when it ends. Until then it sends nothing about it: "
+                + "not its name, its command or what it has printed so far."
+        }
+        guard hasOutput else {
+            return "None recorded. With OTEL_LOG_TOOL_CONTENT=1 in Claude Code's settings, Bash, Read, web and MCP "
+                + "calls send what they returned when they end, and it is kept in the database. A call that failed "
+                + "sends none."
+        }
+        if let kept = step.attributes["output_length"].flatMap(Int.init),
+           let full = step.attributes["output_original_length"].flatMap(Int.init), full > kept {
+            return "The first \(kept.formatted()) of \(full.formatted()) characters; Claude Code cut the rest."
+        }
+        return nil
     }
 }
 

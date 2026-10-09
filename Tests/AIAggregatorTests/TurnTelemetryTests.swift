@@ -293,6 +293,48 @@ struct TurnTelemetryTests {
         #expect(turns.map(\.running) == [true, false])
     }
 
+    @Test func keepsWhatAToolReturned() {
+        func event(_ name: String, _ attributes: [String: Any]) -> [String: Any] {
+            ["name": name, "attributes": attributes.map { key, value in
+                ["key": key, "value": value is Int ? ["intValue": value] : ["stringValue": "\(value)"]]
+            }]
+        }
+        var build = Self.span("tool", id: "T1", parent: "I", 1, 6, ["tool_name": "Bash", "full_command": "swift build"])
+        build["events"] = [
+            event("something.else", ["output": "not this"]),
+            event("tool.output", ["bash_command": "swift build", "output": "Compiling…\nBuild complete!",
+                                  "output_truncated": "true", "output_original_length": 90_000]),
+        ]
+        var read = Self.span("tool", id: "T2", parent: "I", 6, 7, ["tool_name": "Read"])
+        read["events"] = [event("tool.output", ["file_path": "/tmp/a.txt", "content": "hello"])]
+        var request = Self.span("llm_request", id: "L1", parent: "I", 0, 1, ["model": "claude-opus-5-5"])
+        request["events"] = [event("tool.output", ["output": "not a tool call"])]
+        let spans = TraceSpanParser.parse(Self.body([
+            Self.span("interaction", id: "I", parent: nil, 0, 8), build, read, request,
+            Self.span("tool", id: "T3", parent: "I", 7, 8, ["tool_name": "Grep"]),
+        ]))
+
+        let parsedBuild = spans.first { $0.id == "T1" }!
+        #expect(parsedBuild.output == "Compiling…\nBuild complete!")
+        #expect(parsedBuild.attributes["output_length"] == "26")
+        #expect(parsedBuild.attributes["output_original_length"] == "90000")
+        #expect(spans.first { $0.id == "T2" }?.output == "hello")
+        #expect(spans.first { $0.id == "L1" }?.output == nil)
+        #expect(spans.first { $0.id == "T3" }?.attributes["output_length"] == nil)
+
+        // The output is stored beside the spans and read one step at a time.
+        let log = RequestLog(directory: nil)
+        log.record(spans: spans)
+        let db = log.database
+        let step = TurnBuilder.turns(from: db.turnSpans(from: nil, to: nil, limit: 10))[0].steps.first { $0.id == "T1" }!
+        #expect(step.attributes["output_length"] == "26")
+        #expect(db.output(ofSpan: "T1") == "Compiling…\nBuild complete!")
+        #expect(db.output(ofSpan: "T2") == "hello")
+        #expect(db.output(ofSpan: "T3") == nil)
+        log.clear()
+        #expect(db.output(ofSpan: "T1") == nil)
+    }
+
     @Test func findsATurnByWhatItRan() {
         let turn = TurnBuilder.turns(from: TraceSpanParser.parse(Self.body(Self.turn)))[0]
         #expect(turn.matches(""))

@@ -25,6 +25,9 @@ struct TraceSpan: Identifiable, Equatable {
     var host: String? = nil
     /// Every attribute on the span, minus account identifiers and tool input/output content.
     var attributes: [String: String] = [:]
+    /// What a tool call returned, from its `tool.output` event (`OTEL_LOG_TOOL_CONTENT=1`).
+    /// Kept apart from the attributes: it is stored in its own table and read one step at a time.
+    var output: String? = nil
 
     /// The duration Claude Code reports, which it measures on a monotonic clock.
     var durationMs: Double {
@@ -38,6 +41,11 @@ enum TraceSpanParser {
     static let maxValueLength = 2000
     /// Tool input and output content, sent only with detailed tracing on, and up to 60 KB each.
     private static let contentKeys: Set<String> = ["tool_input", "new_context"]
+    /// Longest tool output kept, in UTF-16 units. Claude Code cuts it at 60 KB unless told otherwise.
+    static let maxOutputLength = 256 * 1024
+    /// Where a `tool.output` event puts what the tool returned: a shell's or MCP tool's
+    /// output, a file's text, an edit's patch.
+    private static let outputKeys = ["output", "content", "diff"]
 
     static func parse(_ body: Data) -> [TraceSpan] {
         guard let root = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return [] }
@@ -60,11 +68,27 @@ enum TraceSpanParser {
                     where !OTLPParser.identityKeys.contains(key) && !contentKeys.contains(key) && key != "session.id" {
                         s.attributes[key] = String("\(value)".prefix(maxValueLength))
                     }
+                    if kind == .tool { addOutput(from: span["events"], to: &s) }
                     out.append(s)
                 }
             }
         }
         return out
+    }
+
+    /// Takes what the tool returned from the span's `tool.output` event, and notes its length
+    /// (and the length before Claude Code cut it) among the attributes.
+    private static func addOutput(from events: Any?, to span: inout TraceSpan) {
+        for event in events as? [[String: Any]] ?? [] where event["name"] as? String == "tool.output" {
+            let a = OTLPParser.attributes(event["attributes"])
+            guard let key = outputKeys.first(where: { a[$0] is String }), let text = a[key] as? String, !text.isEmpty
+            else { continue }
+            let kept = String(decoding: Array(text.utf16.prefix(maxOutputLength)), as: UTF16.self)
+            span.output = kept
+            span.attributes["output_length"] = String(kept.utf16.count)
+            if let full = a["\(key)_original_length"] { span.attributes["output_original_length"] = "\(full)" }
+            return
+        }
     }
 }
 
