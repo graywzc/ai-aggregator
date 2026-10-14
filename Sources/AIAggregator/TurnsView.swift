@@ -132,8 +132,10 @@ private struct TurnListView: View {
         let wall = turns.reduce(0.0) { $0 + $1.time.values.reduce(0, +) }
         let running = turns.filter(\.running).count
         let subagents = turns.reduce(0) { $0 + $1.subagents.count }
+        let notifications = turns.filter { $0.triggerSummary != nil }.count
         return HStack(spacing: 16) {
             Text("\(turns.count) turns")
+            if notifications > 0 { Text("\(notifications) started by a notification").foregroundColor(.teal) }
             if subagents > 0 { Text("\(subagents) background subagent\(subagents == 1 ? "" : "s")") }
             if running > 0 { Text("\(running) running").foregroundColor(.green) }
             Text("\(formatSpan(wall)) end to end")
@@ -166,6 +168,9 @@ private struct TurnListView: View {
                             .foregroundColor(.purple)
                             .help("A subagent the turn above started in the background. It kept working after the "
                                 + "Agent call returned; this row runs from that call to its last reported step.")
+                    } else if let summary = t.triggerSummary {
+                        (Text("Notification ").foregroundColor(.teal) + Text(summary).foregroundColor(.secondary))
+                            .help("Claude Code started this turn itself, without a prompt from you:\n\(t.prompt ?? "")")
                     } else {
                         Text(t.prompt?.replacingOccurrences(of: "\n", with: " ") ?? "–")
                             .foregroundColor(t.prompt == nil ? .secondary : .primary)
@@ -297,6 +302,9 @@ private struct TurnTimeline: View {
                 Text("Background subagent" + (turn.subagentType.map { ": \($0)" } ?? "")
                      + ", started \(turn.start.formatted(.dateTime.hour().minute().second())) by the turn above")
                     .foregroundColor(.purple)
+            } else if let summary = turn.triggerSummary {
+                (Text("Notification: ").foregroundColor(.teal) + Text(summary))
+                    .lineLimit(2).textSelection(.enabled)
             } else if let prompt = turn.prompt {
                 Text(prompt.replacingOccurrences(of: "\n", with: " ")).lineLimit(2).textSelection(.enabled)
             }

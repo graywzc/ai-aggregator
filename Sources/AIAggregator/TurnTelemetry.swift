@@ -388,6 +388,39 @@ struct Turn: Identifiable, Equatable {
 
     var isSubagent: Bool { parentTurnId != nil }
 
+    /// What started a turn: a prompt typed by the user, or a message Claude Code sent on its own.
+    enum Trigger: Equatable {
+        case user
+        /// A background command or subagent finished (`<task-notification>`).
+        case taskNotification
+        /// Another session, usually a subagent handing back its report, sent the turn a message.
+        case agentMessage
+    }
+
+    /// Known only when the prompt was recorded (`OTEL_LOG_USER_PROMPTS=1`).
+    var trigger: Trigger? {
+        guard let prompt else { return nil }
+        if prompt.hasPrefix("<task-notification>") { return .taskNotification }
+        if prompt.hasPrefix("Another Claude session sent a message") { return .agentMessage }
+        return .user
+    }
+
+    /// A short label for a turn Claude Code started itself: the notification's own summary
+    /// ("Background command … completed"), or who sent the message.
+    var triggerSummary: String? {
+        switch trigger {
+        case .taskNotification:
+            guard let prompt, let open = prompt.range(of: "<summary>") else { return "A background task finished" }
+            let rest = prompt[open.upperBound...]
+            return String(rest[..<(rest.range(of: "</summary>")?.lowerBound ?? rest.endIndex)])
+        case .agentMessage:
+            return prompt?.contains("[Subagent hand-back]") == true ? "A subagent handed back its report"
+                : "Message from another session"
+        case .user, nil:
+            return nil
+        }
+    }
+
     func ms(_ group: TimeGroup) -> Double {
         time.reduce(0) { $1.key.group == group ? $0 + $1.value : $0 }
     }

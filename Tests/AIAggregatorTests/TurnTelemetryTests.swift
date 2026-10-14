@@ -174,6 +174,30 @@ struct TurnTelemetryTests {
         #expect(close(report.hosts[0].wallMs, 30_000))
     }
 
+    @Test func tellsTurnsClaudeCodeStartedFromPromptsTyped() {
+        func turn(_ prompt: String?) -> Turn {
+            var attributes: [String: Any] = [:]
+            if let prompt { attributes["user_prompt"] = prompt }
+            return TurnBuilder.turns(from: TraceSpanParser.parse(Self.body([Self.span("interaction", id: "I", parent: nil, 0, 1, attributes)])))[0]
+        }
+        let done = turn("""
+            <task-notification>
+            <task-id>b5wia15zz</task-id>
+            <status>completed</status>
+            <summary>Background command "Run the tests" completed (exit code 0)</summary>
+            </task-notification>
+            """)
+        #expect(done.trigger == .taskNotification)
+        #expect(done.triggerSummary == "Background command \"Run the tests\" completed (exit code 0)")
+        let handBack = turn("Another Claude session sent a message:\n<agent-message from=\"a3\">\n[Subagent hand-back] The report follows")
+        #expect(handBack.trigger == .agentMessage)
+        #expect(handBack.triggerSummary == "A subagent handed back its report")
+        #expect(turn("ship it").trigger == .user)
+        #expect(turn("ship it").triggerSummary == nil)
+        #expect(turn("<REDACTED>").trigger == nil)
+        #expect(turn(nil).trigger == nil)
+    }
+
     @Test func aQuestionsPermissionPhaseIsTheUsers() {
         // The desktop app reports no source; a question tool's phase is still the user answering.
         let spans: [[String: Any]] = [
