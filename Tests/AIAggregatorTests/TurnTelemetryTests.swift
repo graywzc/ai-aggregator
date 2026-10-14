@@ -133,6 +133,47 @@ struct TurnTelemetryTests {
         #expect(close(turn.time[.overhead], 1500))
     }
 
+    @Test func aBackgroundSubagentIsATurnUnderItsTurn() {
+        // The Agent call returns at once; the subagent reports steps under it long after the turn ended.
+        let spans: [[String: Any]] = [
+            Self.span("interaction", id: "I", parent: nil, 0, 30, ["interaction.duration_ms": 30_000]),
+            Self.span("llm_request", id: "L1", parent: "I", 0, 5, ["model": "claude-opus-5-5"]),
+            Self.span("tool", id: "A", parent: "I", 5, 5.4, ["tool_name": "Agent", "subagent_type": "general-purpose"]),
+            Self.span("tool.execution", id: "AE", parent: "A", 5, 5.4, ["success": true]),
+            Self.span("llm_request", id: "SL", parent: "AE", 6, 10, ["model": "claude-opus-5-5"]),
+            Self.span("tool", id: "ST", parent: "AE", 10, 1500, ["tool_name": "Bash", "full_command": "swift test"]),
+            Self.span("tool.execution", id: "STE", parent: "ST", 10, 1500, ["success": true]),
+            Self.span("llm_request", id: "SL2", parent: "AE", 1500, 1600, ["model": "claude-opus-5-5"]),
+            // A foreground subagent stays in the turn.
+            Self.span("tool", id: "F", parent: "I", 10, 20, ["tool_name": "Agent", "subagent_type": "Explore"]),
+            Self.span("llm_request", id: "FL", parent: "F", 11, 19, ["model": "claude-haiku-4-5"]),
+        ]
+        let turn = TurnBuilder.turns(from: TraceSpanParser.parse(Self.body(spans)))[0]
+
+        #expect(turn.steps.map(\.id) == ["L1", "A", "F", "FL"])
+        #expect(turn.steps[1].background)
+        #expect(!turn.steps[2].background)
+        #expect(close(turn.wallMs, 30_000))
+        #expect(turn.requestCount == 2)
+
+        #expect(turn.subagents.count == 1)
+        let sub = turn.subagents[0]
+        #expect(sub.id == "A")
+        #expect(sub.isSubagent && sub.parentTurnId == "I")
+        #expect(sub.subagentType == "general-purpose")
+        #expect(sub.steps.map(\.id) == ["SL", "ST", "SL2"])
+        #expect(sub.steps.map(\.depth) == [0, 0, 0])
+        #expect(close(sub.wallMs, 1_595_000))
+        #expect(close(sub.time[.test], 1_490_000))
+        #expect(close(sub.time[.model], 104_000))
+        #expect(turn.matches("swift test"))
+
+        // Its steps still count in the step comparison.
+        let report = TurnReport.build(from: [turn])
+        #expect(report.activities.first { $0.activity == .test }?.count == 1)
+        #expect(close(report.hosts[0].wallMs, 30_000))
+    }
+
     @Test func aQuestionsPermissionPhaseIsTheUsers() {
         // The desktop app reports no source; a question tool's phase is still the user answering.
         let spans: [[String: Any]] = [

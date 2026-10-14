@@ -105,8 +105,16 @@ private struct TurnListView: View {
     let turns: [Turn]
     let database: RequestDatabase
     @State private var selection: Turn.ID?
+    /// Turns whose background subagents are folded away.
+    @State private var collapsed: Set<Turn.ID> = []
 
-    private var selected: Turn? { turns.first { $0.id == selection } ?? turns.first }
+    /// Each turn, followed by its background subagents unless it is folded.
+    private var rows: [Turn] {
+        turns.flatMap { [$0] + (collapsed.contains($0.id) ? [] : $0.subagents) }
+    }
+    private var selected: Turn? {
+        turns.flatMap { [$0] + $0.subagents }.first { $0.id == selection } ?? turns.first
+    }
 
     var body: some View {
         VSplitView {
@@ -123,8 +131,10 @@ private struct TurnListView: View {
     private var summary: some View {
         let wall = turns.reduce(0.0) { $0 + $1.time.values.reduce(0, +) }
         let running = turns.filter(\.running).count
+        let subagents = turns.reduce(0) { $0 + $1.subagents.count }
         return HStack(spacing: 16) {
             Text("\(turns.count) turns")
+            if subagents > 0 { Text("\(subagents) background subagent\(subagents == 1 ? "" : "s")") }
             if running > 0 { Text("\(running) running").foregroundColor(.green) }
             Text("\(formatSpan(wall)) end to end")
             ForEach(TimeGroup.allCases) { group in
@@ -138,21 +148,29 @@ private struct TurnListView: View {
     }
 
     private var table: some View {
-        Table(turns, selection: $selection) {
+        Table(rows, selection: $selection) {
             Group {
                 TableColumn("Started") { (t: Turn) in
                     HStack(spacing: 4) {
+                        disclosure(t)
                         Text(t.start.formatted(.dateTime.month().day().hour().minute().second()))
                         if t.running { Circle().fill(Color.green).frame(width: 6, height: 6).help("Still running") }
                     }
                 }
-                .width(150)
+                .width(170)
                 TableColumn("Host") { (t: Turn) in Text(HostName.label(t.host)) }.width(min: 50, ideal: 70)
                 TableColumn("Session") { (t: Turn) in Text(t.sessionId.map { String($0.prefix(8)) } ?? "–") }.width(70)
                 TableColumn("Prompt") { (t: Turn) in
-                    Text(t.prompt?.replacingOccurrences(of: "\n", with: " ") ?? "–")
-                        .foregroundColor(t.prompt == nil ? .secondary : .primary)
-                        .help(t.prompt ?? "Set OTEL_LOG_USER_PROMPTS=1 to record prompt text")
+                    if t.isSubagent {
+                        Text("Background subagent" + (t.subagentType.map { ": \($0)" } ?? ""))
+                            .foregroundColor(.purple)
+                            .help("A subagent the turn above started in the background. It kept working after the "
+                                + "Agent call returned; this row runs from that call to its last reported step.")
+                    } else {
+                        Text(t.prompt?.replacingOccurrences(of: "\n", with: " ") ?? "–")
+                            .foregroundColor(t.prompt == nil ? .secondary : .primary)
+                            .help(t.prompt ?? "Set OTEL_LOG_USER_PROMPTS=1 to record prompt text")
+                    }
                 }
                 .width(min: 120, ideal: 220)
                 TableColumn("End to end") { (t: Turn) in
@@ -183,6 +201,27 @@ private struct TurnListView: View {
     }
 
     private func ms(_ value: Double) -> Text { Text(value >= 1 ? formatSpan(value) : "–") }
+
+    /// A fold toggle on a turn with background subagents; an elbow indenting a subagent's row.
+    @ViewBuilder private func disclosure(_ t: Turn) -> some View {
+        if t.isSubagent {
+            Text("  └").foregroundColor(.secondary).frame(width: 26, alignment: .leading)
+        } else if !t.subagents.isEmpty {
+            let folded = collapsed.contains(t.id)
+            Button {
+                if folded { collapsed.remove(t.id) } else { collapsed.insert(t.id) }
+            } label: {
+                HStack(spacing: 1) {
+                    Image(systemName: folded ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
+                    Text("\(t.subagents.count)").font(.system(size: 10))
+                }
+            }
+            .buttonStyle(.borderless).frame(width: 26, alignment: .leading)
+            .help("\(t.subagents.count) background subagent\(t.subagents.count == 1 ? "" : "s"); click to \(folded ? "show" : "hide")")
+        } else {
+            Color.clear.frame(width: 26, height: 1)
+        }
+    }
 }
 
 /// The selected turn as a waterfall: one row per model request, tool call and hook, placed
@@ -254,7 +293,11 @@ private struct TurnTimeline: View {
 
     private func heading(_ turn: Turn, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let prompt = turn.prompt {
+            if turn.isSubagent {
+                Text("Background subagent" + (turn.subagentType.map { ": \($0)" } ?? "")
+                     + ", started \(turn.start.formatted(.dateTime.hour().minute().second())) by the turn above")
+                    .foregroundColor(.purple)
+            } else if let prompt = turn.prompt {
                 Text(prompt.replacingOccurrences(of: "\n", with: " ")).lineLimit(2).textSelection(.enabled)
             }
             HStack(spacing: 14) {
@@ -302,6 +345,7 @@ private struct StepRow: View {
                 Text(step.title).lineLimit(1).foregroundColor(unreported ? .secondary : .primary)
                 if !step.success { Text("failed").foregroundColor(.orange) }
                 if step.running, !unreported { Text("running").foregroundColor(.green) }
+                if step.background { Text("background").foregroundColor(.purple) }
             }
             .padding(.leading, CGFloat(step.depth) * 12)
             .frame(width: 190, alignment: .leading)
@@ -343,6 +387,7 @@ private struct StepRow: View {
             lines.append("\(step.permissionByUser ? "waiting on you" : "permission check") \(formatSpan(wait.duration * 1000))")
         }
         if let run = step.executionMs { lines.append("running \(formatSpan(run))") }
+        if step.background { lines.append("started a subagent in the background; its steps are listed under this turn") }
         if let detail = step.detail { lines.append(detail) }
         lines += step.reported.map { "\($0.key): \($0.value)" }
         if !unreported { lines.append("Click for the whole step") }
