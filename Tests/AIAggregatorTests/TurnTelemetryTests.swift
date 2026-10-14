@@ -198,6 +198,42 @@ struct TurnTelemetryTests {
         #expect(turn(nil).trigger == nil)
     }
 
+    @Test func nestsTurnsUnderTheTurnWhoseWorkTheyAreAbout() {
+        func notification(_ toolUse: String) -> String {
+            "<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>\(toolUse)</tool-use-id>\n<summary>done</summary>\n</task-notification>"
+        }
+        let spans: [[String: Any]] = [
+            // The prompted turn starts a background command and a background subagent.
+            Self.span("interaction", id: "I1", parent: nil, 0, 10, trace: "t1", ["user_prompt": "run it"]),
+            Self.span("tool", id: "B", parent: "I1", 1, 2, trace: "t1", ["tool_name": "Bash", "tool_use_id": "toolu_bash"]),
+            Self.span("tool", id: "A", parent: "I1", 3, 3.4, trace: "t1", ["tool_name": "Agent", "tool_use_id": "toolu_agent"]),
+            Self.span("tool.execution", id: "AE", parent: "A", 3, 3.4, trace: "t1"),
+            Self.span("llm_request", id: "AL", parent: "AE", 4, 200, trace: "t1", ["model": "claude-opus-5-5", "agent_id": "agent1"]),
+            // The command finishes; that turn starts another command.
+            Self.span("interaction", id: "I2", parent: nil, 100, 110, trace: "t2", ["user_prompt": notification("toolu_bash")]),
+            Self.span("tool", id: "B2", parent: "I2", 101, 102, trace: "t2", ["tool_name": "Bash", "tool_use_id": "toolu_bash2"]),
+            // The subagent hands back its report, then its notification arrives.
+            Self.span("interaction", id: "I3", parent: nil, 201, 205, trace: "t3",
+                      ["user_prompt": "Another Claude session sent a message:\n<agent-message from=\"agent1\">\n[Subagent hand-back] ok"]),
+            Self.span("interaction", id: "I4", parent: nil, 206, 207, trace: "t4", ["user_prompt": notification("toolu_agent")]),
+            // The second command finishes.
+            Self.span("interaction", id: "I5", parent: nil, 300, 301, trace: "t5", ["user_prompt": notification("toolu_bash2")]),
+            // About a call in a turn that isn't loaded.
+            Self.span("interaction", id: "I6", parent: nil, 400, 401, trace: "t6", ["user_prompt": notification("toolu_gone")]),
+        ]
+        let turns = TurnBuilder.turns(from: TraceSpanParser.parse(Self.body(spans)))
+        #expect(turns.count == 6)
+        #expect(turns.first { $0.id == "I2" }?.notifiedToolUseId == "toolu_bash")
+        #expect(turns.first { $0.id == "I3" }?.messagingAgentId == "agent1")
+
+        let tree = TurnBuilder.nest(turns)
+        #expect(tree.map(\.id) == ["I6", "I1"])
+        let first = tree[1]
+        #expect(first.subagents.map(\.id) == ["A"])
+        #expect(first.followUps.map(\.id) == ["I2", "I3", "I4"])
+        #expect(first.followUps[0].followUps.map(\.id) == ["I5"])
+    }
+
     @Test func aQuestionsPermissionPhaseIsTheUsers() {
         // The desktop app reports no source; a question tool's phase is still the user answering.
         let spans: [[String: Any]] = [

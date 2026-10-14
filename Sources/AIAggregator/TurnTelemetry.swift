@@ -387,6 +387,12 @@ struct Turn: Identifiable, Equatable {
     var subagentType: String? = nil
 
     var isSubagent: Bool { parentTurnId != nil }
+    /// The turns Claude Code started when something this turn set going finished: its
+    /// background commands' and subagents' notifications, and its subagents' hand-backs.
+    /// Filled in by `TurnBuilder.nest`.
+    var followUps: [Turn] = []
+    /// How deep the row sits in the Turns table; set when the tree is laid out as rows.
+    var nesting = 0
 
     /// What started a turn: a prompt typed by the user, or a message Claude Code sent on its own.
     enum Trigger: Equatable {
@@ -405,14 +411,30 @@ struct Turn: Identifiable, Equatable {
         return .user
     }
 
+    /// The tool call whose background task this turn's notification is about.
+    var notifiedToolUseId: String? {
+        trigger == .taskNotification ? prompt.flatMap { Self.tag("tool-use-id", in: $0) } : nil
+    }
+
+    /// The subagent that sent this turn's message.
+    var messagingAgentId: String? {
+        guard trigger == .agentMessage, let prompt, let open = prompt.range(of: "from=\"") else { return nil }
+        let rest = prompt[open.upperBound...]
+        return rest.range(of: "\"").map { String(rest[..<$0.lowerBound]) }
+    }
+
+    private static func tag(_ name: String, in text: String) -> String? {
+        guard let open = text.range(of: "<\(name)>"), let close = text.range(of: "</\(name)>", range: open.upperBound..<text.endIndex)
+        else { return nil }
+        return String(text[open.upperBound..<close.lowerBound])
+    }
+
     /// A short label for a turn Claude Code started itself: the notification's own summary
     /// ("Background command … completed"), or who sent the message.
     var triggerSummary: String? {
         switch trigger {
         case .taskNotification:
-            guard let prompt, let open = prompt.range(of: "<summary>") else { return "A background task finished" }
-            let rest = prompt[open.upperBound...]
-            return String(rest[..<(rest.range(of: "</summary>")?.lowerBound ?? rest.endIndex)])
+            return prompt.flatMap { Self.tag("summary", in: $0) } ?? "A background task finished"
         case .agentMessage:
             return prompt?.contains("[Subagent hand-back]") == true ? "A subagent handed back its report"
                 : "Message from another session"
@@ -473,6 +495,39 @@ enum TurnBuilder {
 
         return interactions.map { turn(from: $0, members: members[$0.id] ?? [], open: open) }
             .sorted { $0.start > $1.start }
+    }
+
+    /// Puts each turn Claude Code started itself under the turn that set it going: a task
+    /// notification under the turn that made the tool call it names, a subagent's hand-back
+    /// under the turn whose subagent sent it. A turn whose starter isn't among `turns` stays
+    /// at the top. Takes turns newest first and returns the top-level ones newest first.
+    static func nest(_ turns: [Turn]) -> [Turn] {
+        var byToolUse: [String: String] = [:]
+        var byAgent: [String: String] = [:]
+        for turn in turns {
+            for step in turn.steps + turn.subagents.flatMap(\.steps) {
+                if let id = step.attributes["tool_use_id"] { byToolUse[id] = turn.id }
+                if let id = step.attributes["agent_id"] { byAgent[id] = turn.id }
+            }
+        }
+        let starts = Dictionary(turns.map { ($0.id, $0.start) }, uniquingKeysWith: { a, _ in a })
+        var children: [String: [Turn]] = [:]
+        var roots: [Turn] = []
+        for turn in turns {
+            let starter = turn.notifiedToolUseId.flatMap { byToolUse[$0] } ?? turn.messagingAgentId.flatMap { byAgent[$0] }
+            // A starter must come first, which also rules out loops.
+            if let starter, starter != turn.id, let start = starts[starter], start <= turn.start {
+                children[starter, default: []].append(turn)
+            } else {
+                roots.append(turn)
+            }
+        }
+        func attach(_ turn: Turn) -> Turn {
+            var turn = turn
+            turn.followUps = (children[turn.id] ?? []).sorted { $0.start < $1.start }.map(attach)
+            return turn
+        }
+        return roots.map(attach)
     }
 
     /// Stand-ins for the spans still open. A span is exported when it ends, so a running
