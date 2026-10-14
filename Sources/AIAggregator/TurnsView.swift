@@ -105,12 +105,20 @@ private struct TurnListView: View {
     let turns: [Turn]
     let database: RequestDatabase
     @State private var selection: Turn.ID?
-    /// Turns whose background subagents are folded away.
+    /// Turns whose background subagents and follow-up turns are folded away.
     @State private var collapsed: Set<Turn.ID> = []
 
-    /// Each turn, followed by its background subagents unless it is folded.
+    /// Each turn, followed unless it is folded by its background subagents and then the turns
+    /// that came of it, each of those followed by its own.
     private var rows: [Turn] {
-        turns.flatMap { [$0] + (collapsed.contains($0.id) ? [] : $0.subagents) }
+        func lay(_ turn: Turn, at depth: Int) -> [Turn] {
+            var row = turn
+            row.nesting = depth
+            guard !collapsed.contains(turn.id) else { return [row] }
+            let subagents = turn.subagents.map { var s = $0; s.nesting = depth + 1; return s }
+            return [row] + subagents + turn.followUps.flatMap { lay($0, at: depth + 1) }
+        }
+        return TurnBuilder.nest(turns).flatMap { lay($0, at: 0) }
     }
     private var selected: Turn? {
         turns.flatMap { [$0] + $0.subagents }.first { $0.id == selection } ?? turns.first
@@ -159,7 +167,7 @@ private struct TurnListView: View {
                         if t.running { Circle().fill(Color.green).frame(width: 6, height: 6).help("Still running") }
                     }
                 }
-                .width(170)
+                .width(min: 170, ideal: 200)
                 TableColumn("Host") { (t: Turn) in Text(HostName.label(t.host)) }.width(min: 50, ideal: 70)
                 TableColumn("Session") { (t: Turn) in Text(t.sessionId.map { String($0.prefix(8)) } ?? "–") }.width(70)
                 TableColumn("Prompt") { (t: Turn) in
@@ -170,7 +178,8 @@ private struct TurnListView: View {
                                 + "Agent call returned; this row runs from that call to its last reported step.")
                     } else if let summary = t.triggerSummary {
                         (Text("Notification ").foregroundColor(.teal) + Text(summary).foregroundColor(.secondary))
-                            .help("Claude Code started this turn itself, without a prompt from you:\n\(t.prompt ?? "")")
+                            .help("Claude Code started this turn itself, without a prompt from you"
+                                + (t.nesting > 0 ? ", about work the turn above set going" : "") + ":\n\(t.prompt ?? "")")
                     } else {
                         Text(t.prompt?.replacingOccurrences(of: "\n", with: " ") ?? "–")
                             .foregroundColor(t.prompt == nil ? .secondary : .primary)
@@ -207,25 +216,39 @@ private struct TurnListView: View {
 
     private func ms(_ value: Double) -> Text { Text(value >= 1 ? formatSpan(value) : "–") }
 
-    /// A fold toggle on a turn with background subagents; an elbow indenting a subagent's row.
+    /// An elbow indenting a nested row, then a fold toggle on a turn with rows nested under it.
     @ViewBuilder private func disclosure(_ t: Turn) -> some View {
-        if t.isSubagent {
-            Text("  └").foregroundColor(.secondary).frame(width: 26, alignment: .leading)
-        } else if !t.subagents.isEmpty {
-            let folded = collapsed.contains(t.id)
-            Button {
-                if folded { collapsed.remove(t.id) } else { collapsed.insert(t.id) }
-            } label: {
-                HStack(spacing: 1) {
-                    Image(systemName: folded ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
-                    Text("\(t.subagents.count)").font(.system(size: 10))
-                }
+        let nested = t.subagents.count + t.followUps.count
+        HStack(spacing: 0) {
+            if t.nesting > 0 {
+                Text("└").foregroundColor(.secondary)
+                    .padding(.leading, CGFloat(min(t.nesting, 6) - 1) * 10 + 4).frame(width: CGFloat(min(t.nesting, 6)) * 10 + 4, alignment: .leading)
             }
-            .buttonStyle(.borderless).frame(width: 26, alignment: .leading)
-            .help("\(t.subagents.count) background subagent\(t.subagents.count == 1 ? "" : "s"); click to \(folded ? "show" : "hide")")
-        } else {
-            Color.clear.frame(width: 26, height: 1)
+            if nested > 0 {
+                let folded = collapsed.contains(t.id)
+                Button {
+                    if folded { collapsed.remove(t.id) } else { collapsed.insert(t.id) }
+                } label: {
+                    HStack(spacing: 1) {
+                        Image(systemName: folded ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
+                        Text("\(nested)").font(.system(size: 10))
+                    }
+                }
+                .buttonStyle(.borderless).frame(width: 26, alignment: .leading)
+                .help(nestedHelp(t) + "; click to \(folded ? "show" : "hide")")
+            } else {
+                Color.clear.frame(width: 26, height: 1)
+            }
         }
+    }
+
+    private func nestedHelp(_ t: Turn) -> String {
+        var parts: [String] = []
+        if !t.subagents.isEmpty { parts.append("\(t.subagents.count) background subagent\(t.subagents.count == 1 ? "" : "s")") }
+        if !t.followUps.isEmpty {
+            parts.append("\(t.followUps.count) turn\(t.followUps.count == 1 ? "" : "s") started by a notification about its work")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
