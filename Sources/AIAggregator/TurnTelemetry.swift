@@ -352,6 +352,9 @@ struct TurnStep: Identifiable, Equatable {
     /// Still going: Claude Code has reported steps inside it but not the step itself, so
     /// its `end` is only the last moment reported on.
     var running = false
+    /// An Agent call that started its subagent in the background: the call returns at once and
+    /// the subagent's steps are listed as a subagent turn of their own under this turn.
+    var background = false
     var attributes: [String: String] = [:]
 
     /// Time spent doing the work: a tool call without its permission phase.
@@ -375,6 +378,15 @@ struct Turn: Identifiable, Equatable {
     var time: [Activity: Double] = [:]
     /// Still going: its steps so far, `end` being the last moment Claude Code has reported on.
     var running = false
+    /// The subagents this turn started in the background, each a turn of its own: Claude Code
+    /// reports their steps under the Agent call that started them, after the call (and often
+    /// the turn) has ended.
+    var subagents: [Turn] = []
+    /// For a background subagent: the turn that started it and the kind of agent it is.
+    var parentTurnId: String? = nil
+    var subagentType: String? = nil
+
+    var isSubagent: Bool { parentTurnId != nil }
 
     func ms(_ group: TimeGroup) -> Double {
         time.reduce(0) { $1.key.group == group ? $0 + $1.value : $0 }
@@ -387,9 +399,10 @@ struct Turn: Identifiable, Equatable {
     func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
-        var fields: [String?] = [prompt, sessionId, HostName.label(host)]
+        var fields: [String?] = [prompt, sessionId, HostName.label(host), subagentType]
         for step in steps { fields += [step.title, step.detail, step.label] }
         return fields.contains { $0?.localizedCaseInsensitiveContains(query) == true }
+            || subagents.contains { $0.matches(query) }
     }
 }
 
@@ -407,7 +420,7 @@ enum TurnBuilder {
         let spans = spans + pending
         let byId = Dictionary(spans.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let interactions = spans.filter { $0.kind == .interaction }
-        var members: [String: [(span: TraceSpan, ancestors: [TraceSpan])]] = [:]
+        var members: [String: [Member]] = [:]
 
         for span in spans where span.kind != .interaction {
             var ancestors: [TraceSpan] = []
@@ -464,13 +477,63 @@ enum TurnBuilder {
         return out
     }
 
-    private static func turn(from root: TraceSpan, members: [(span: TraceSpan, ancestors: [TraceSpan])],
-                             open: Set<String> = []) -> Turn {
+    private typealias Member = (span: TraceSpan, ancestors: [TraceSpan])
+
+    /// How far past its Agent call a subagent's steps must reach for the subagent to count as
+    /// started in the background. A foreground call lasts until its subagent's last step.
+    static let backgroundSlack: TimeInterval = 1
+
+    private static func turn(from root: TraceSpan, members: [Member], open: Set<String> = []) -> Turn {
         let prompt = root.attributes["user_prompt"].flatMap { $0 == "<REDACTED>" || $0.isEmpty ? nil : $0 }
         var turn = Turn(id: root.id, start: root.start, end: root.end, wallMs: root.durationMs,
                         host: root.host, sessionId: root.sessionId, prompt: prompt)
         turn.running = open.contains(root.id)
 
+        // Each step goes to the outermost background subagent it ran in, or to the turn itself.
+        let background = backgroundAgents(in: members)
+        var own: [Member] = []
+        var delegated: [String: [Member]] = [:]
+        for member in members {
+            if let agent = member.ancestors.last(where: { background.contains($0.id) }) {
+                delegated[agent.id, default: []].append(member)
+            } else {
+                own.append(member)
+            }
+        }
+        fill(&turn, with: own, open: open, background: background)
+
+        for (agentId, inside) in delegated {
+            guard let agent = own.first(where: { $0.span.id == agentId })?.span else { continue }
+            let end = max(agent.end, inside.map(\.span.end).max() ?? agent.end)
+            var sub = Turn(id: agent.id, start: agent.start, end: end, wallMs: end.timeIntervalSince(agent.start) * 1000,
+                           host: root.host, sessionId: root.sessionId, prompt: nil)
+            sub.parentTurnId = root.id
+            sub.subagentType = agent.attributes["subagent_type"]
+            // Inside the subagent, depth counts from the Agent call down.
+            let relative = inside.map { m in (span: m.span, ancestors: Array(m.ancestors.prefix { $0.id != agentId })) }
+            fill(&sub, with: relative, open: open, background: [])
+            turn.subagents.append(sub)
+        }
+        turn.subagents.sort { ($0.start, $0.id) < ($1.start, $1.id) }
+        return turn
+    }
+
+    /// The Agent calls among the members whose subagent kept reporting steps after the call ended.
+    private static func backgroundAgents(in members: [Member]) -> Set<String> {
+        var lastInside: [String: Date] = [:]
+        for member in members {
+            for ancestor in member.ancestors where ancestor.kind == .tool {
+                lastInside[ancestor.id] = max(lastInside[ancestor.id] ?? .distantPast, member.span.end)
+            }
+        }
+        return Set(members.map(\.span).filter { span in
+            span.kind == .tool && ["Agent", "Task"].contains(span.attributes["tool_name"] ?? "")
+                && (lastInside[span.id].map { $0.timeIntervalSince(span.end) > backgroundSlack } ?? false)
+        }.map(\.id))
+    }
+
+    /// Adds the members' steps to the turn and splits its time among them.
+    private static func fill(_ turn: inout Turn, with members: [Member], open: Set<String>, background: Set<String>) {
         let children = Dictionary(grouping: members.filter { $0.span.parentId != nil }, by: { $0.span.parentId! })
         var claims: [Claim] = []
         for (span, ancestors) in members {
@@ -495,6 +558,7 @@ enum TurnBuilder {
                                  start: span.start, end: span.end, durationMs: span.durationMs, depth: depth,
                                  success: execution?.attributes["success"] != "false")
                 s.executionMs = execution?.durationMs
+                s.background = background.contains(span.id)
                 if let wait = own.first(where: { $0.kind == .permission }) {
                     s.permission = DateInterval(start: wait.start, end: wait.end)
                     s.permissionByUser = Activity.permissionIsUsers(wait, tool: name)
@@ -519,8 +583,7 @@ enum TurnBuilder {
             }
         }
         turn.steps.sort { ($0.start, $0.depth, $0.id) < ($1.start, $1.depth, $1.id) }
-        turn.time = attribute(claims, from: root.start, to: root.end)
-        return turn
+        turn.time = attribute(claims, from: turn.start, to: turn.end)
     }
 
     /// A span's claim on the stretch of the turn it covers.
@@ -624,7 +687,7 @@ struct TurnReport: Equatable {
             for group in TimeGroup.allCases { summary.time[group, default: 0] += turn.ms(group) }
             hosts[host] = summary
 
-            for step in turn.steps {
+            for step in turn.steps + turn.subagents.flatMap(\.steps) {
                 let stat = ActivityStat(activity: step.activity, label: step.label, host: host)
                 samples[stat.id, default: (stat, [])].values.append(step.workMs)
             }
