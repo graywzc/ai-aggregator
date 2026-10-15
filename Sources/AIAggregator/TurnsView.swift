@@ -105,23 +105,23 @@ private struct TurnListView: View {
     let turns: [Turn]
     let database: RequestDatabase
     @State private var selection: Turn.ID?
-    /// Turns whose background subagents and follow-up turns are folded away.
+    /// Rows whose background work and follow-up turns are folded away.
     @State private var collapsed: Set<Turn.ID> = []
 
-    /// Each turn, followed unless it is folded by its background subagents and then the turns
-    /// that came of it, each of those followed by its own.
+    /// Each turn, followed unless it is folded by its background subagents and commands and
+    /// the turns that came of it, in the order they started, each followed by its own.
     private var rows: [Turn] {
         func lay(_ turn: Turn, at depth: Int) -> [Turn] {
             var row = turn
             row.nesting = depth
             guard !collapsed.contains(turn.id) else { return [row] }
-            let subagents = turn.subagents.map { var s = $0; s.nesting = depth + 1; return s }
-            return [row] + subagents + turn.followUps.flatMap { lay($0, at: depth + 1) }
+            let nested = (turn.background + turn.followUps).sorted { ($0.start, $0.id) < ($1.start, $1.id) }
+            return [row] + nested.flatMap { lay($0, at: depth + 1) }
         }
         return TurnBuilder.nest(turns).flatMap { lay($0, at: 0) }
     }
     private var selected: Turn? {
-        turns.flatMap { [$0] + $0.subagents }.first { $0.id == selection } ?? turns.first
+        turns.flatMap { [$0] + $0.background }.first { $0.id == selection } ?? turns.first
     }
 
     var body: some View {
@@ -139,12 +139,14 @@ private struct TurnListView: View {
     private var summary: some View {
         let wall = turns.reduce(0.0) { $0 + $1.time.values.reduce(0, +) }
         let running = turns.filter(\.running).count
-        let subagents = turns.reduce(0) { $0 + $1.subagents.count }
+        let subagents = turns.reduce(0) { $0 + $1.background.filter { $0.backgroundKind == .subagent }.count }
+        let commands = turns.reduce(0) { $0 + $1.background.filter { $0.backgroundKind == .command }.count }
         let notifications = turns.filter { $0.triggerSummary != nil }.count
         return HStack(spacing: 16) {
             Text("\(turns.count) turns")
             if notifications > 0 { Text("\(notifications) started by a notification").foregroundColor(.teal) }
             if subagents > 0 { Text("\(subagents) background subagent\(subagents == 1 ? "" : "s")") }
+            if commands > 0 { Text("\(commands) background command\(commands == 1 ? "" : "s")") }
             if running > 0 { Text("\(running) running").foregroundColor(.green) }
             Text("\(formatSpan(wall)) end to end")
             ForEach(TimeGroup.allCases) { group in
@@ -171,7 +173,13 @@ private struct TurnListView: View {
                 TableColumn("Host") { (t: Turn) in Text(HostName.label(t.host)) }.width(min: 50, ideal: 70)
                 TableColumn("Session") { (t: Turn) in Text(t.sessionId.map { String($0.prefix(8)) } ?? "–") }.width(70)
                 TableColumn("Prompt") { (t: Turn) in
-                    if t.isSubagent {
+                    if t.backgroundKind == .command {
+                        (Text("Background command ").foregroundColor(.purple)
+                            + Text(t.command?.replacingOccurrences(of: "\n", with: " ") ?? "").foregroundColor(.secondary)
+                            + Text(t.exitNote.map { "  \($0)" } ?? "").foregroundColor(t.exitedCleanly ? .secondary : .orange))
+                            .help("A shell command the turn above sent to the background. The row covers its process "
+                                + "from start to exit, as Claude Code reported it.\n\(t.command ?? "")")
+                    } else if t.isBackground {
                         Text("Background subagent" + (t.subagentType.map { ": \($0)" } ?? ""))
                             .foregroundColor(.purple)
                             .help("A subagent the turn above started in the background. It kept working after the "
@@ -218,7 +226,7 @@ private struct TurnListView: View {
 
     /// An elbow indenting a nested row, then a fold toggle on a turn with rows nested under it.
     @ViewBuilder private func disclosure(_ t: Turn) -> some View {
-        let nested = t.subagents.count + t.followUps.count
+        let nested = t.background.count + t.followUps.count
         HStack(spacing: 0) {
             if t.nesting > 0 {
                 Text("└").foregroundColor(.secondary)
@@ -244,7 +252,10 @@ private struct TurnListView: View {
 
     private func nestedHelp(_ t: Turn) -> String {
         var parts: [String] = []
-        if !t.subagents.isEmpty { parts.append("\(t.subagents.count) background subagent\(t.subagents.count == 1 ? "" : "s")") }
+        let subagents = t.background.filter { $0.backgroundKind == .subagent }.count
+        let commands = t.background.filter { $0.backgroundKind == .command }.count
+        if subagents > 0 { parts.append("\(subagents) background subagent\(subagents == 1 ? "" : "s")") }
+        if commands > 0 { parts.append("\(commands) background command\(commands == 1 ? "" : "s")") }
         if !t.followUps.isEmpty {
             parts.append("\(t.followUps.count) turn\(t.followUps.count == 1 ? "" : "s") started by a notification about its work")
         }
@@ -321,7 +332,11 @@ private struct TurnTimeline: View {
 
     private func heading(_ turn: Turn, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            if turn.isSubagent {
+            if turn.backgroundKind == .command {
+                Text("Background command, started \(turn.start.formatted(.dateTime.hour().minute().second())) by the turn above"
+                     + (turn.exitNote.map { ", \($0)" } ?? ""))
+                    .foregroundColor(.purple)
+            } else if turn.isBackground {
                 Text("Background subagent" + (turn.subagentType.map { ": \($0)" } ?? "")
                      + ", started \(turn.start.formatted(.dateTime.hour().minute().second())) by the turn above")
                     .foregroundColor(.purple)
@@ -695,6 +710,14 @@ private struct Ticking<Content: View>: View {
 }
 
 private extension Turn {
+    /// How a background command's process ended, as Claude Code reported it.
+    var exitNote: String? {
+        if interrupted { return "interrupted" + (exitCode.map { " (exit \($0))" } ?? "") }
+        return exitCode.map { "exit \($0)" }
+    }
+
+    var exitedCleanly: Bool { !interrupted && (exitCode ?? "0") == "0" }
+
     /// Where the turn ends: now while it runs. Another machine's clock can be ahead of this one.
     func end(at now: Date) -> Date { running ? max(now, end) : end }
 

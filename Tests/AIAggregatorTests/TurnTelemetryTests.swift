@@ -156,10 +156,10 @@ struct TurnTelemetryTests {
         #expect(close(turn.wallMs, 30_000))
         #expect(turn.requestCount == 2)
 
-        #expect(turn.subagents.count == 1)
-        let sub = turn.subagents[0]
+        #expect(turn.background.count == 1)
+        let sub = turn.background[0]
         #expect(sub.id == "A")
-        #expect(sub.isSubagent && sub.parentTurnId == "I")
+        #expect(sub.isBackground && sub.parentTurnId == "I")
         #expect(sub.subagentType == "general-purpose")
         #expect(sub.steps.map(\.id) == ["SL", "ST", "SL2"])
         #expect(sub.steps.map(\.depth) == [0, 0, 0])
@@ -229,9 +229,50 @@ struct TurnTelemetryTests {
         let tree = TurnBuilder.nest(turns)
         #expect(tree.map(\.id) == ["I6", "I1"])
         let first = tree[1]
-        #expect(first.subagents.map(\.id) == ["A"])
-        #expect(first.followUps.map(\.id) == ["I2", "I3", "I4"])
+        #expect(first.background.map(\.id) == ["A"])
+        #expect(first.followUps.map(\.id) == ["I2"])
+        // The subagent's hand-back and notification sit under the subagent's own row.
+        #expect(first.background[0].followUps.map(\.id) == ["I3", "I4"])
         #expect(first.followUps[0].followUps.map(\.id) == ["I5"])
+    }
+
+    @Test func aBackgroundCommandIsARowUnderItsTurn() {
+        let spans: [[String: Any]] = [
+            Self.span("interaction", id: "I", parent: nil, 0, 20, ["user_prompt": "watch CI"]),
+            // Sent to the background: the call returns at once, the process runs for five minutes.
+            Self.span("tool", id: "B", parent: "I", 1, 1.1, ["tool_name": "Bash", "tool_use_id": "toolu_b",
+                                                              "full_command": "gh pr checks 30 --watch"]),
+            Self.span("tool.execution", id: "BE", parent: "B", 1, 1.1, ["success": true]),
+            Self.span("bash.subprocess", id: "BS", parent: "BE", 1.02, 301, ["backgrounded": true, "exit_code": 0]),
+            // An ordinary command's process ends inside its call.
+            Self.span("tool", id: "F", parent: "I", 2, 4, ["tool_name": "Bash", "full_command": "swift build"]),
+            Self.span("tool.execution", id: "FE", parent: "F", 2, 4, ["success": true]),
+            Self.span("bash.subprocess", id: "FS", parent: "FE", 2.1, 3.9, ["exit_code": 0]),
+            // The command's notification.
+            Self.span("interaction", id: "N", parent: nil, 302, 305, trace: "t2", ["user_prompt":
+                "<task-notification>\n<tool-use-id>toolu_b</tool-use-id>\n<summary>Background command done</summary>\n</task-notification>"]),
+        ]
+        let turns = TurnBuilder.turns(from: TraceSpanParser.parse(Self.body(spans)))
+        let turn = turns.first { $0.id == "I" }!
+
+        #expect(turn.steps.map(\.id) == ["B", "F"])
+        #expect(turn.steps[0].background && !turn.steps[1].background)
+        #expect(close(turn.time[.overhead], 18_000 - 100))
+        #expect(turn.background.count == 1)
+        let row = turn.background[0]
+        #expect(row.backgroundKind == .command && row.parentTurnId == "I")
+        #expect(row.command == "gh pr checks 30 --watch")
+        #expect(row.exitCode == "0" && !row.interrupted)
+        #expect(close(row.wallMs, 299_980))
+        #expect(row.steps.map(\.activity) == [.git])
+        #expect(close(row.time[.git], 299_980))
+        #expect(turn.matches("pr checks"))
+
+        // The notification sits under the command it is about.
+        let tree = TurnBuilder.nest(turns)
+        #expect(tree.map(\.id) == ["I"])
+        #expect(tree[0].followUps.isEmpty)
+        #expect(tree[0].background[0].followUps.map(\.id) == ["N"])
     }
 
     @Test func aQuestionsPermissionPhaseIsTheUsers() {

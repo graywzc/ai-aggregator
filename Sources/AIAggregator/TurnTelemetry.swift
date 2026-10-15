@@ -11,6 +11,9 @@ struct TraceSpan: Identifiable, Equatable {
         /// The permission phase of a tool call: a rule, a hook, the auto-mode classifier or the user.
         case permission = "tool.blocked_on_user"
         case execution = "tool.execution"
+        /// The shell process a Bash call ran. It ends when the process exits, so for a command
+        /// sent to the background (`backgrounded`) it covers the whole run, long after the call.
+        case subprocess = "bash.subprocess"
         case hook
     }
 
@@ -378,15 +381,24 @@ struct Turn: Identifiable, Equatable {
     var time: [Activity: Double] = [:]
     /// Still going: its steps so far, `end` being the last moment Claude Code has reported on.
     var running = false
-    /// The subagents this turn started in the background, each a turn of its own: Claude Code
-    /// reports their steps under the Agent call that started them, after the call (and often
-    /// the turn) has ended.
-    var subagents: [Turn] = []
-    /// For a background subagent: the turn that started it and the kind of agent it is.
+    /// The subagents and shell commands this turn started in the background, each a row of
+    /// its own: Claude Code reports them under the call that started them, after the call (and
+    /// often the turn) has ended.
+    var background: [Turn] = []
+    /// For background work: the turn that started it and what it is.
     var parentTurnId: String? = nil
+    var backgroundKind: BackgroundKind? = nil
     var subagentType: String? = nil
+    /// For a background command: the command, and how its process ended.
+    var command: String? = nil
+    var exitCode: String? = nil
+    var interrupted = false
 
-    var isSubagent: Bool { parentTurnId != nil }
+    enum BackgroundKind: Equatable { case subagent, command }
+    /// The Agent or shell call in the parent turn that started this background work.
+    var launchStepId: String? = nil
+
+    var isBackground: Bool { parentTurnId != nil }
     /// The turns Claude Code started when something this turn set going finished: its
     /// background commands' and subagents' notifications, and its subagents' hand-backs.
     /// Filled in by `TurnBuilder.nest`.
@@ -454,10 +466,10 @@ struct Turn: Identifiable, Equatable {
     func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
-        var fields: [String?] = [prompt, sessionId, HostName.label(host), subagentType]
+        var fields: [String?] = [prompt, sessionId, HostName.label(host), subagentType, command]
         for step in steps { fields += [step.title, step.detail, step.label] }
         return fields.contains { $0?.localizedCaseInsensitiveContains(query) == true }
-            || subagents.contains { $0.matches(query) }
+            || background.contains { $0.matches(query) }
     }
 }
 
@@ -502,15 +514,27 @@ enum TurnBuilder {
     /// under the turn whose subagent sent it. A turn whose starter isn't among `turns` stays
     /// at the top. Takes turns newest first and returns the top-level ones newest first.
     static func nest(_ turns: [Turn]) -> [Turn] {
+        // Each call and subagent maps to the row about it: the background row it started, or
+        // else the turn it ran in.
         var byToolUse: [String: String] = [:]
         var byAgent: [String: String] = [:]
+        var starts: [String: Date] = [:]
         for turn in turns {
-            for step in turn.steps + turn.subagents.flatMap(\.steps) {
-                if let id = step.attributes["tool_use_id"] { byToolUse[id] = turn.id }
+            starts[turn.id] = turn.start
+            let launched = Dictionary(turn.background.compactMap { row in row.launchStepId.map { ($0, row.id) } },
+                                      uniquingKeysWith: { a, _ in a })
+            for step in turn.steps {
+                if let id = step.attributes["tool_use_id"] { byToolUse[id] = launched[step.id] ?? turn.id }
                 if let id = step.attributes["agent_id"] { byAgent[id] = turn.id }
             }
+            for row in turn.background {
+                starts[row.id] = row.start
+                for step in row.steps {
+                    if let id = step.attributes["tool_use_id"], byToolUse[id] == nil { byToolUse[id] = row.id }
+                    if let id = step.attributes["agent_id"] { byAgent[id] = row.id }
+                }
+            }
         }
-        let starts = Dictionary(turns.map { ($0.id, $0.start) }, uniquingKeysWith: { a, _ in a })
         var children: [String: [Turn]] = [:]
         var roots: [Turn] = []
         for turn in turns {
@@ -525,6 +549,7 @@ enum TurnBuilder {
         func attach(_ turn: Turn) -> Turn {
             var turn = turn
             turn.followUps = (children[turn.id] ?? []).sorted { $0.start < $1.start }.map(attach)
+            turn.background = turn.background.map(attach)
             return turn
         }
         return roots.map(attach)
@@ -541,7 +566,7 @@ enum TurnBuilder {
         for (trace, members) in Dictionary(grouping: spans.filter { !finished.contains($0.traceId) }, by: \.traceId) {
             let waiting = members.filter { $0.parentId.map { !known.contains($0) } ?? false }.sorted { $0.start < $1.start }
             // A turn opens with a step of its own, so the earliest one names the turn.
-            guard let first = waiting.first(where: { $0.kind != .permission && $0.kind != .execution }),
+            guard let first = waiting.first(where: { ![.permission, .execution, .subprocess].contains($0.kind) }),
                   let rootId = first.parentId, let last = members.map(\.end).max(),
                   now.timeIntervalSince(last) < runningWindow else { continue }
             var root = TraceSpan(id: rootId, traceId: trace, parentId: nil, kind: .interaction,
@@ -556,7 +581,7 @@ enum TurnBuilder {
                 call.sessionId = first.sessionId
                 call.host = first.host
                 // Only a subagent runs steps of its own; a tool call has just its two phases.
-                if inside.contains(where: { $0.kind != .permission && $0.kind != .execution }) {
+                if inside.contains(where: { ![.permission, .execution, .subprocess].contains($0.kind) }) {
                     call.attributes["tool_name"] = "Agent"
                 }
                 out.append(call)
@@ -590,26 +615,50 @@ enum TurnBuilder {
         }
         fill(&turn, with: own, open: open, background: background)
 
+        for (tool, process) in backgroundCommands(in: own) {
+            var row = Turn(id: process.id, start: process.start, end: process.end, wallMs: process.durationMs,
+                           host: root.host, sessionId: root.sessionId, prompt: nil)
+            row.parentTurnId = root.id
+            row.backgroundKind = .command
+            row.command = tool.attributes["full_command"]
+            row.exitCode = process.attributes["exit_code"]
+            row.interrupted = process.attributes["interrupted"] == "true"
+            let kind = Activity.of(tool: tool.attributes["tool_name"] ?? "Bash", command: row.command)
+            var step = TurnStep(id: process.id, activity: kind.activity, title: tool.attributes["tool_name"] ?? "Bash",
+                                detail: row.command, label: kind.label, start: process.start, end: process.end,
+                                durationMs: process.durationMs, depth: 0,
+                                success: (row.exitCode ?? "0") == "0" && !row.interrupted)
+            step.attributes = process.attributes
+            row.steps = [step]
+            row.time = [kind.activity: process.end.timeIntervalSince(process.start) * 1000]
+            row.launchStepId = tool.id
+            turn.background.append(row)
+            if let i = turn.steps.firstIndex(where: { $0.id == tool.id }) { turn.steps[i].background = true }
+        }
+
         for (agentId, inside) in delegated {
             guard let agent = own.first(where: { $0.span.id == agentId })?.span else { continue }
-            let end = max(agent.end, inside.map(\.span.end).max() ?? agent.end)
+            let end = max(agent.end, inside.filter { $0.span.kind != .subprocess }.map(\.span.end).max() ?? agent.end)
             var sub = Turn(id: agent.id, start: agent.start, end: end, wallMs: end.timeIntervalSince(agent.start) * 1000,
                            host: root.host, sessionId: root.sessionId, prompt: nil)
             sub.parentTurnId = root.id
+            sub.backgroundKind = .subagent
+            sub.launchStepId = agent.id
             sub.subagentType = agent.attributes["subagent_type"]
             // Inside the subagent, depth counts from the Agent call down.
             let relative = inside.map { m in (span: m.span, ancestors: Array(m.ancestors.prefix { $0.id != agentId })) }
             fill(&sub, with: relative, open: open, background: [])
-            turn.subagents.append(sub)
+            turn.background.append(sub)
         }
-        turn.subagents.sort { ($0.start, $0.id) < ($1.start, $1.id) }
+        turn.background.sort { ($0.start, $0.id) < ($1.start, $1.id) }
         return turn
     }
 
     /// The Agent calls among the members whose subagent kept reporting steps after the call ended.
     private static func backgroundAgents(in members: [Member]) -> Set<String> {
         var lastInside: [String: Date] = [:]
-        for member in members {
+        // A shell process left running in the background doesn't keep its call going.
+        for member in members where member.span.kind != .subprocess {
             for ancestor in member.ancestors where ancestor.kind == .tool {
                 lastInside[ancestor.id] = max(lastInside[ancestor.id] ?? .distantPast, member.span.end)
             }
@@ -618,6 +667,20 @@ enum TurnBuilder {
             span.kind == .tool && ["Agent", "Task"].contains(span.attributes["tool_name"] ?? "")
                 && (lastInside[span.id].map { $0.timeIntervalSince(span.end) > backgroundSlack } ?? false)
         }.map(\.id))
+    }
+
+    /// The shell calls among the members whose process ran on in the background, each with
+    /// that process: flagged `backgrounded`, or still running past the call's end.
+    private static func backgroundCommands(in members: [Member]) -> [(tool: TraceSpan, process: TraceSpan)] {
+        members.compactMap { member -> (tool: TraceSpan, process: TraceSpan)? in
+            guard member.span.kind == .subprocess,
+                  let tool = member.ancestors.first(where: { $0.kind == .tool }) else { return nil }
+            let process = member.span
+            guard process.attributes["backgrounded"] == "true" || process.end.timeIntervalSince(tool.end) > backgroundSlack
+            else { return nil }
+            return (tool, process)
+        }
+        .sorted { $0.process.start < $1.process.start }
     }
 
     /// Adds the members' steps to the turn and splits its time among them.
@@ -660,7 +723,7 @@ enum TurnBuilder {
             case .permission:
                 let byUser = Activity.permissionIsUsers(span, tool: ancestors.first?.attributes["tool_name"])
                 claims.append(Claim(span: span, activity: byUser ? .user : .permission, depth: ancestors.count))
-            case .execution, .interaction:
+            case .execution, .subprocess, .interaction:
                 break
             }
             if var step {
@@ -775,7 +838,7 @@ struct TurnReport: Equatable {
             for group in TimeGroup.allCases { summary.time[group, default: 0] += turn.ms(group) }
             hosts[host] = summary
 
-            for step in turn.steps + turn.subagents.flatMap(\.steps) {
+            for step in turn.steps + turn.background.flatMap(\.steps) {
                 let stat = ActivityStat(activity: step.activity, label: step.label, host: host)
                 samples[stat.id, default: (stat, [])].values.append(step.workMs)
             }
