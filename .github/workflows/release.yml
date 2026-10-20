@@ -14,10 +14,20 @@ jobs:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
     steps:
+      # Runs before anything is built or published: a dead token used to surface
+      # only at "Check out Homebrew tap", leaving a released-but-uncasked version.
       - name: Validate Homebrew tap token
         run: |
           if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
             echo "::error::Set HOMEBREW_TAP_TOKEN so releases can open the matching Homebrew tap PR."
+            exit 1
+          fi
+
+          if ! curl -sf -o /dev/null \
+            -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/graywzc/homebrew-tap; then
+            echo "::error::HOMEBREW_TAP_TOKEN is invalid, expired, or cannot reach graywzc/homebrew-tap."
             exit 1
           fi
 
