@@ -272,22 +272,7 @@ class UsageService: ObservableObject {
                         return
                     }
 
-                    var windows: [UsageWindow] = []
-                    if let five = dict["five_hour"] as? [String: Any],
-                       let util = five["utilization"] as? Double {
-                        windows.append(UsageWindow(
-                            label: "5h",
-                            percentRemaining: Int(100.0 - util),
-                            resetsAt: self.extractReset(from: five)))
-                    }
-                    if let seven = dict["seven_day"] as? [String: Any],
-                       let util = seven["utilization"] as? Double {
-                        windows.append(UsageWindow(
-                            label: "7d",
-                            percentRemaining: Int(100.0 - util),
-                            resetsAt: self.extractReset(from: seven)))
-                    }
-
+                    let windows = self.claudeUsageWindows(from: dict)
                     self.claudeWindows = windows
                     self.claudeError = nil
                 } catch {
@@ -296,6 +281,40 @@ class UsageService: ObservableObject {
                 }
             }
         }.resume()
+    }
+
+    /// The 5h and 7d windows, then one row per model with its own weekly cap
+    /// (Fable today), which the usage endpoint lists under `limits` with a
+    /// `scope.model`. The model rows carry percent used, like the other windows.
+    internal func claudeUsageWindows(from dict: [String: Any]) -> [UsageWindow] {
+        var windows: [UsageWindow] = []
+        if let five = dict["five_hour"] as? [String: Any],
+           let util = five["utilization"] as? Double {
+            windows.append(UsageWindow(
+                label: "5h",
+                percentRemaining: Int(100.0 - util),
+                resetsAt: extractReset(from: five)))
+        }
+        if let seven = dict["seven_day"] as? [String: Any],
+           let util = seven["utilization"] as? Double {
+            windows.append(UsageWindow(
+                label: "7d",
+                percentRemaining: Int(100.0 - util),
+                resetsAt: extractReset(from: seven)))
+        }
+        for limit in dict["limits"] as? [[String: Any]] ?? [] {
+            guard let scope = limit["scope"] as? [String: Any],
+                  let model = scope["model"] as? [String: Any],
+                  let name = model["display_name"] as? String,
+                  let used = limit["percent"] as? Double else { continue }
+            // "Fable 5.1" -> "fable": the family name fits the label column.
+            let family = name.split(separator: " ").first.map(String.init) ?? name
+            windows.append(UsageWindow(
+                label: family.lowercased(),
+                percentRemaining: Int(100.0 - used),
+                resetsAt: extractReset(from: limit)))
+        }
+        return windows
     }
 
     // MARK: - Reset-time parsing helpers

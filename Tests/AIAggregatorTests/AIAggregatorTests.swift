@@ -99,4 +99,32 @@ struct AIAggregatorTests {
         let badge = window.resetsAt.map { "7d: 42% · resets \(formatResetDate($0))" } ?? "7d: 42%"
         #expect(badge == "7d: 42%")
     }
+
+    // MARK: - Claude usage parsing
+
+    @Test func claudeUsageWindows_includesModelScopedLimit() throws {
+        let json = """
+        {"five_hour": {"utilization": 58.0, "resets_at": "2026-10-27T18:30:00Z"},
+         "seven_day": {"utilization": 19.0, "resets_at": "2026-10-30T06:00:00Z"},
+         "limits": [
+           {"kind": "weekly", "group": "model", "percent": 15.0,
+            "resets_at": "2026-10-30T06:00:00Z", "severity": "normal", "is_active": true,
+            "scope": {"model": {"display_name": "Fable"}}},
+           {"kind": "weekly", "group": "surface", "percent": 3.0, "resets_at": null,
+            "severity": "normal", "is_active": true,
+            "scope": {"surface": {"display_name": "Cowork"}}}
+         ]}
+        """
+        let dict = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let windows = UsageService.shared.claudeUsageWindows(from: dict)
+        #expect(windows.map(\.label) == ["5h", "7d", "fable"])
+        #expect(windows.map(\.percentRemaining) == [42, 81, 85])
+        #expect(windows[2].resetsAt == ISO8601DateFormatter().date(from: "2026-10-30T06:00:00Z"))
+    }
+
+    @Test func claudeUsageWindows_withoutLimits() throws {
+        let dict: [String: Any] = ["five_hour": ["utilization": 10.0], "seven_day": ["utilization": 20.0]]
+        let windows = UsageService.shared.claudeUsageWindows(from: dict)
+        #expect(windows.map(\.label) == ["5h", "7d"])
+    }
 }
