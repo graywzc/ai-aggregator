@@ -118,12 +118,16 @@ private struct StatsTable: View {
     let keyTitle: String
     let rows: [StatsRow]
     let showsCost: Bool
+    /// Empty keeps the order SQLite returned; clicking a sortable header fills it.
+    @State private var sortOrder: [KeyPathComparator<StatsRow>] = []
+
+    private var sortedRows: [StatsRow] { sortOrder.isEmpty ? rows : rows.sorted(using: sortOrder) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title).font(.caption).foregroundColor(.secondary).padding(.horizontal, 8).padding(.vertical, 4)
-            Table(rows) {
-                TableColumn(keyTitle) { (r: StatsRow) in
+            Table(sortedRows, sortOrder: $sortOrder) {
+                TableColumn(keyTitle, value: \StatsRow.key) { (r: StatsRow) in
                     Text(r.key.replacingOccurrences(of: "claude-", with: ""))
                 }
                 .width(min: 100, ideal: 200, max: 320)
@@ -139,7 +143,8 @@ private struct StatsTable: View {
                     Text(r.stats.averageOutputTokens.map { String(Int($0.rounded())) } ?? "–")
                 }
                 .width(60)
-                TableColumn(showsCost ? "Cost" : "") { (r: StatsRow) in
+                // The first click sorts the biggest spend to the top.
+                TableColumn(showsCost ? "Cost" : "", sortUsing: KeyPathComparator(\StatsRow.stats.costUsd, order: .reverse)) { (r: StatsRow) in
                     Text(showsCost ? r.stats.reportedCostUsd.map(formatMoney) ?? "–" : "")
                 }
                 .width(showsCost ? 80 : 0)
