@@ -54,6 +54,19 @@ The Stats tab of the same window totals the history over a period (today, yester
 sqlite3 ~/Library/Application\ Support/AIAggregator/claude-code.sqlite "select date(date,'unixepoch','localtime') day, round(sum(cost_usd),2) usd from requests where success group by day order by day desc limit 14"
 ```
 
+The "By proj" table splits the same figures by the directory each session worked in, so you can see what a day's spend went on. Claude Code's telemetry doesn't say where a session ran, so the app works it out from the paths its tool calls mention (with `OTEL_LOG_TOOL_DETAILS` on, see [Turns](#turns-end-to-end)): the directories shell commands `cd` to, the scratchpad and memory folders named after the working directory, and the folder shared by every file the session read or edited. A worktree under `.claude/worktrees` or `.codex/worktrees` counts as its repository. Sessions that touched no absolute path, such as a two-command question, show as "(unknown)". For an exact answer, let Claude Code report the directory itself with a `SessionStart` hook that posts the hook's input to the same port (add it to the `hooks` in `~/.claude/settings.json`, with this Mac's tailnet name in place of `127.0.0.1` on your other machines):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command",
+      "command": "curl -s -m 2 -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:14318/v1/session"}]}]
+  }
+}
+```
+
+A directory the hook reported is kept over any inference. Projects are stored in the `session_projects` table.
+
 Internal calls such as the auto-mode permission classifier appear too, labeled by their source; Claude Code reports no TTFT for them. The Prompt column shows your prompt text only if you also set `"OTEL_LOG_USER_PROMPTS": "1"`; that text is then stored in the same folder.
 
 ### Turns: end to end

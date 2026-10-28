@@ -31,6 +31,13 @@ final class RequestLog: ObservableObject {
         database = RequestDatabase(url: databaseURL)
         if let directory, source == .claudeCode { Self.importLegacyFiles(in: directory, into: database) }
         load()
+        if source == .claudeCode {
+            // Sessions stored before 1.19 have no project yet; work them out from their tool calls.
+            DispatchQueue.global(qos: .utility).async { [database, weak self] in
+                database.backfillProjects()
+                DispatchQueue.main.async { self?.revision += 1 }
+            }
+        }
     }
 
     /// `~/Library/Application Support/AIAggregator`, or `$AIAGGREGATOR_DATA_DIR` when set so a
@@ -67,6 +74,12 @@ final class RequestLog: ObservableObject {
     func record(spans: [TraceSpan]) {
         database.insert(spans: spans)
         DispatchQueue.main.async { [weak self] in self?.spanRevision += 1 }
+    }
+
+    /// Stores where a session worked, as a `SessionStart` hook reported it. Callable from any thread.
+    func record(project: SessionProject) {
+        database.upsert(project: project)
+        DispatchQueue.main.async { [weak self] in self?.revision += 1 }
     }
 
     func promptText(for request: RequestSpeed) -> String? {

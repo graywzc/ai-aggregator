@@ -227,6 +227,10 @@ final class SpeedStatsService: ObservableObject {
         log.record(spans: spans)
     }
 
+    fileprivate func ingest(project: SessionProject) {
+        log.record(project: project)
+    }
+
     fileprivate func ingest(_ batch: (requests: [RequestSpeed], prompts: [PromptRecord])) {
         guard !batch.requests.isEmpty || !batch.prompts.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
@@ -347,6 +351,10 @@ final class TelemetryListener: ObservableObject {
         OTLPReceiver(address: address, port: SpeedStatsService.port, queue: queue) { [weak self] body, sender in
             guard let self else { return }
             let host = sender.map(self.hostName)
+            if let project = ProjectInference.hookReport(body) {
+                SpeedStatsService.shared.ingest(project: project)
+                return
+            }
             SpeedStatsService.shared.ingest(Self.tagged(OTLPParser.parseBatch(body), host: host))
             SpeedStatsService.shared.ingest(spans: TraceSpanParser.parse(body).map { var s = $0; s.host = host; return s })
             SpeedStatsService.codex.ingest(Self.tagged(self.codexParser.parseBatch(body), host: host))

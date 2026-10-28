@@ -31,6 +31,8 @@ enum StatsGrouping {
     case day
     /// The machine that sent it; "" for this Mac.
     case host
+    /// The directory the session worked in (`SessionProject`); "" when unknown.
+    case project
 }
 
 /// SQLite store of every request and trace span the app has seen from an agent, uncapped, so totals and
@@ -101,6 +103,7 @@ final class RequestDatabase: @unchecked Sendable {
             run("DELETE FROM prompts", [])
             run("DELETE FROM spans", [])
             run("DELETE FROM span_outputs", [])
+            run("DELETE FROM session_projects", [])
         }
     }
 
@@ -119,6 +122,62 @@ final class RequestDatabase: @unchecked Sendable {
                 }
             }
             exec("COMMIT")
+            inferProjects(for: Set(spans.lazy.filter { $0.kind == .tool }.compactMap(\.sessionId)))
+        }
+    }
+
+    // MARK: - Session projects
+
+    /// Records where a session worked. A hook's report is exact and is never replaced by an
+    /// inference; an inference replaces an earlier inference.
+    func upsert(project: SessionProject) {
+        queue.sync { store(project) }
+    }
+
+    private func store(_ project: SessionProject) {
+        var project = project
+        if project.source == .inferred,
+           query("SELECT source FROM session_projects WHERE session_id = ?", [project.sessionId]) { Self.text($0, 0) }.first == "hook" {
+            return
+        }
+        // A session known only by its slug takes the path another session spelled out.
+        if project.path == nil,
+           let known = query("SELECT path FROM session_projects WHERE slug = ? AND path IS NOT NULL LIMIT 1", [project.slug], { Self.text($0, 0) }).first,
+           let path = known {
+            project.path = path
+            project.name = ProjectInference.name(path)
+        }
+        run("INSERT OR REPLACE INTO session_projects (session_id, path, slug, name, source) VALUES (?, ?, ?, ?, ?)",
+            [project.sessionId, project.path, project.slug, project.name, project.source.rawValue])
+    }
+
+    func project(ofSession id: String) -> SessionProject? {
+        queue.sync { query("SELECT session_id, path, slug, name, source FROM session_projects WHERE session_id = ?", [id], Self.project).first }
+    }
+
+    private static func project(_ stmt: OpaquePointer) -> SessionProject {
+        var p = SessionProject(sessionId: text(stmt, 0) ?? "", path: text(stmt, 1), slug: text(stmt, 2),
+                               source: SessionProject.Source(rawValue: text(stmt, 4) ?? "") ?? .inferred)
+        p.name = text(stmt, 3) ?? p.name
+        return p
+    }
+
+    /// Works out the project of each session from its tool spans so far. Call only on `queue`.
+    private func inferProjects(for sessions: Set<String>) {
+        for session in sessions {
+            let spans = query("SELECT \(Self.spanColumns) FROM spans WHERE session_id = ? AND kind = 'tool'", [session], Self.span)
+            if let project = ProjectInference.infer(sessionId: session, spans: spans) { store(project) }
+        }
+    }
+
+    /// Infers the project of every session stored before this version kept projects. Runs once;
+    /// slow on a big history, so call it off the main thread.
+    func backfillProjects() {
+        queue.sync {
+            guard query("SELECT value FROM meta WHERE key = 'projects_backfilled'", []) { Self.text($0, 0) }.isEmpty else { return }
+            let sessions = query("SELECT DISTINCT session_id FROM spans WHERE kind = 'tool' AND session_id IS NOT NULL", []) { Self.text($0, 0) ?? "" }
+            inferProjects(for: Set(sessions))
+            run("INSERT OR REPLACE INTO meta (key, value) VALUES ('projects_backfilled', '1')", [])
         }
     }
 
@@ -217,7 +276,15 @@ final class RequestDatabase: @unchecked Sendable {
         case .model: key = "model"; order = "cost DESC, requests DESC, key"
         case .host: key = "COALESCE(host, '')"; order = "requests DESC, key"
         case .day: key = "date(date, 'unixepoch', 'localtime')"; order = "key DESC"
+        case .project:
+            key = "COALESCE(p.name, '')"; order = "cost DESC, requests DESC, key"
         }
+        // Sessions known only by their slug (no path seen) take the name of one that spelled the path out.
+        let projects = """
+            SELECT session_id, slug, COALESCE((SELECT q.name FROM session_projects q WHERE q.slug = p.slug AND q.path IS NOT NULL \
+            ORDER BY q.source LIMIT 1), p.name) AS name FROM session_projects p
+            """
+        let from = grouping == .project ? "requests LEFT JOIN (\(projects)) p ON p.session_id = requests.session_id" : "requests"
         let rated = "success AND ttft_ms IS NOT NULL AND duration_ms > ttft_ms AND output_tokens >= \(RequestSpeed.minOutputTokens)"
         let sql = """
             SELECT \(key) AS key,
@@ -231,7 +298,7 @@ final class RequestDatabase: @unchecked Sendable {
                    COALESCE(SUM(CASE WHEN \(rated) THEN duration_ms - ttft_ms END), 0),
                    COALESCE(SUM(CASE WHEN success THEN ttft_ms END), 0),
                    SUM(CASE WHEN success AND ttft_ms IS NOT NULL THEN 1 ELSE 0 END)
-            FROM requests \(whereSQL)
+            FROM \(from) \(whereSQL)
             GROUP BY key
             ORDER BY \(order)
             """
@@ -301,6 +368,19 @@ final class RequestDatabase: @unchecked Sendable {
         CREATE TABLE IF NOT EXISTS span_outputs (
             span_id TEXT PRIMARY KEY,
             output TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS session_projects (
+            session_id TEXT PRIMARY KEY,
+            path TEXT,
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS spans_session ON spans(session_id, kind);
+        CREATE INDEX IF NOT EXISTS session_projects_slug ON session_projects(slug);
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );
         """
 
